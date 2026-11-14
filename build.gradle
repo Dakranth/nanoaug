@@ -1,0 +1,23 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.78'
+}
+
+version = '1.0.0'
+group = 'com.nanoaug'
+base { archivesName = 'nanoaug' }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = '21.1.172'   // troque pela última 21.1.x se der erro de versão
+    runs {
+        client { client() }
+        server { server(); programArguments.add('--nogui') }
+    }
+    mods {
+        nanoaug { sourceSet(sourceSets.main) }
+    }
+}
+
+repositories { mavenCentral() }
