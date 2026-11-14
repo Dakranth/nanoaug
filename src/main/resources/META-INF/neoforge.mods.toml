@@ -1,0 +1,24 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="nanoaug"
+version="1.0.0"
+displayName="Nano Augmentations"
+description='''Aprimoramentos cibernéticos inspirados em Deus Ex: Mankind Divided.
+Colete Kits Praxis, instale augs, veja-os no corpo do personagem e use overclock.'''
+
+[[dependencies.nanoaug]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.nanoaug]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.22)"
+ordering="NONE"
+side="BOTH"
