@@ -29,12 +29,18 @@ public class ClientSetup {
     public static final Map<Aug, KeyMapping> KEYS = new EnumMap<>(Aug.class);
 
     static {
-        KEYS.put(Aug.CLOAK, new KeyMapping("key.nanoaug.cloak", InputConstants.KEY_C, CAT));
-        KEYS.put(Aug.REMOTE_HACK, new KeyMapping("key.nanoaug.remote_hack", InputConstants.KEY_X, CAT));
         KEYS.put(Aug.SMART_VISION, new KeyMapping("key.nanoaug.smart_vision", InputConstants.KEY_B, CAT));
+        KEYS.put(Aug.CLOAK, new KeyMapping("key.nanoaug.cloak", InputConstants.KEY_C, CAT));
         KEYS.put(Aug.TITAN, new KeyMapping("key.nanoaug.titan", InputConstants.KEY_H, CAT));
-        KEYS.put(Aug.TYPHOON, new KeyMapping("key.nanoaug.typhoon", InputConstants.KEY_G, CAT));
+        KEYS.put(Aug.FOCUS, new KeyMapping("key.nanoaug.focus", InputConstants.KEY_J, CAT));
+        KEYS.put(Aug.LIDAR, new KeyMapping("key.nanoaug.lidar", InputConstants.KEY_M, CAT));
+        KEYS.put(Aug.PUNCH, new KeyMapping("key.nanoaug.punch", InputConstants.KEY_K, CAT));
+        KEYS.put(Aug.TAKEDOWN, new KeyMapping("key.nanoaug.takedown", InputConstants.KEY_Z, CAT));
+        KEYS.put(Aug.PEPS, new KeyMapping("key.nanoaug.peps", InputConstants.KEY_Y, CAT));
+        KEYS.put(Aug.REMOTE_HACK, new KeyMapping("key.nanoaug.remote_hack", InputConstants.KEY_X, CAT));
         KEYS.put(Aug.TESLA, new KeyMapping("key.nanoaug.tesla", InputConstants.KEY_R, CAT));
+        KEYS.put(Aug.NANOBLADE, new KeyMapping("key.nanoaug.nanoblade", InputConstants.KEY_N, CAT));
+        KEYS.put(Aug.TYPHOON, new KeyMapping("key.nanoaug.typhoon", InputConstants.KEY_G, CAT));
         KEYS.put(Aug.ICARUS_DASH, new KeyMapping("key.nanoaug.icarus_dash", InputConstants.KEY_V, CAT));
     }
 

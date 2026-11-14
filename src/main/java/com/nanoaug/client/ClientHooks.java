@@ -11,8 +11,8 @@ public class ClientHooks {
         if (p == null) return;
         AugData d = AugData.get(p);
         d.praxis = s.praxis();
-        d.installed.clear();
-        d.installed.addAll(s.installed());
+        d.levels.clear();
+        d.levels.putAll(s.levels());
         d.active.clear();
         d.active.addAll(s.active());
         d.energy = s.energy();

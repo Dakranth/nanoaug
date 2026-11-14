@@ -11,18 +11,22 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 public class Net {
     private static final StreamCodec<ByteBuf, List<String>> STRS = ByteBufCodecs.STRING_UTF8.apply(ByteBufCodecs.list());
+    private static final StreamCodec<ByteBuf, HashMap<String, Integer>> LEVELS =
+            ByteBufCodecs.<ByteBuf, String, Integer, HashMap<String, Integer>>map(HashMap::new,
+                    ByteBufCodecs.STRING_UTF8, ByteBufCodecs.VAR_INT);
 
     /** servidor -> cliente */
-    public record Sync(int praxis, List<String> installed, List<String> active, float energy, int overclock, int overheat)
+    public record Sync(int praxis, HashMap<String, Integer> levels, List<String> active, float energy, int overclock, int overheat)
             implements CustomPacketPayload {
         public static final Type<Sync> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, "sync"));
         public static final StreamCodec<ByteBuf, Sync> CODEC = StreamCodec.composite(
                 ByteBufCodecs.VAR_INT, Sync::praxis,
-                STRS, Sync::installed,
+                LEVELS, Sync::levels,
                 STRS, Sync::active,
                 ByteBufCodecs.FLOAT, Sync::energy,
                 ByteBufCodecs.VAR_INT, Sync::overclock,
@@ -31,7 +35,7 @@ public class Net {
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
-    /** cliente -> servidor. op: 0 = instalar, 1 = usar/alternar, 2 = overclock */
+    /** cliente -> servidor. op: 0 = melhorar/instalar, 1 = usar/alternar, 2 = overclock */
     public record Request(String id, byte op) implements CustomPacketPayload {
         public static final Type<Request> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, "request"));
         public static final StreamCodec<ByteBuf, Request> CODEC = StreamCodec.composite(
@@ -53,7 +57,7 @@ public class Net {
 
     public static void sync(ServerPlayer p) {
         AugData d = AugData.get(p);
-        PacketDistributor.sendToPlayer(p, new Sync(d.praxis, new ArrayList<>(d.installed),
+        PacketDistributor.sendToPlayer(p, new Sync(d.praxis, new HashMap<>(d.levels),
                 new ArrayList<>(d.active), d.energy, d.overclock, d.overheat));
     }
 }

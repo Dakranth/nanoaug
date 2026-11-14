@@ -2,7 +2,6 @@ package com.nanoaug;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -23,221 +22,336 @@ import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.AbstractArrow;
+import net.minecraft.world.entity.projectile.Arrow;
 import net.minecraft.world.inventory.MerchantMenu;
+import net.minecraft.world.item.BowItem;
+import net.minecraft.world.item.CrossbowItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.item.trading.MerchantOffer;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.loot.LootPool;
 import net.minecraft.world.level.storage.loot.entries.LootItem;
 import net.minecraft.world.level.storage.loot.predicates.LootItemRandomChanceCondition;
 import net.minecraft.world.level.storage.loot.providers.number.ConstantValue;
-import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.LootTableLoadEvent;
-import net.neoforged.neoforge.event.entity.living.*;
+import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
+import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
+import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
+import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
+import net.neoforged.neoforge.event.entity.living.LivingFallEvent;
+import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 @EventBusSubscriber(modid = NanoAug.MODID)
 public class Logic {
 
-    // ---------------------------------------------------------------- passivos (atributos)
-    private record PassiveMod(Aug aug, Holder<Attribute> attr, double amount, AttributeModifier.Operation op) {}
+    // ================================================================ números do jogo
+    /** Custo de energia por uso (augs ACTION). */
+    public static float cost(Aug a, AugData d) {
+        return switch (a) {
+            case PUNCH, TAKEDOWN, NANOBLADE -> 25f;
+            case PEPS -> 30f;
+            case REMOTE_HACK -> 15f;
+            case TESLA -> 35f;
+            case TYPHOON -> 60f;
+            case ICARUS_DASH -> d.lvl(a) == 1 ? 20f : d.lvl(a) == 2 ? 12f : 18f;
+            default -> 0f;
+        };
+    }
 
-    private static final List<PassiveMod> MODS = List.of(
-            new PassiveMod(Aug.DERMAL, Attributes.ARMOR, 6, AttributeModifier.Operation.ADD_VALUE),
-            new PassiveMod(Aug.DERMAL, Attributes.ARMOR_TOUGHNESS, 2, AttributeModifier.Operation.ADD_VALUE),
-            new PassiveMod(Aug.STRENGTH, Attributes.BLOCK_BREAK_SPEED, 0.6, AttributeModifier.Operation.ADD_MULTIPLIED_BASE),
-            new PassiveMod(Aug.STRENGTH, Attributes.ATTACK_DAMAGE, 2, AttributeModifier.Operation.ADD_VALUE),
-            new PassiveMod(Aug.REFLEX, Attributes.ATTACK_SPEED, 1.0, AttributeModifier.Operation.ADD_VALUE),
-            new PassiveMod(Aug.JUMP, Attributes.JUMP_STRENGTH, 0.18, AttributeModifier.Operation.ADD_VALUE),
-            new PassiveMod(Aug.JUMP, Attributes.SAFE_FALL_DISTANCE, 3, AttributeModifier.Operation.ADD_VALUE),
-            new PassiveMod(Aug.SERVO, Attributes.MOVEMENT_SPEED, 0.15, AttributeModifier.Operation.ADD_MULTIPLIED_BASE)
-    );
+    static int cooldown(Aug a) {
+        return switch (a) {
+            case LIDAR -> 4;
+            case PUNCH -> 20;
+            case TAKEDOWN -> 30;
+            case PEPS, REMOTE_HACK -> 40;
+            case TESLA -> 100;
+            case NANOBLADE -> 20;
+            case TYPHOON -> 300;
+            case ICARUS_DASH -> 30;
+            default -> 0;
+        };
+    }
+
+    /** Gasto de energia por tick (augs TOGGLE). Camuflagem e TITAN gastam muito mais se você se mexe. */
+    static float drain(Aug a, AugData d, ServerPlayer p) {
+        int l = d.lvl(a);
+        boolean moving = p.getDeltaMovement().horizontalDistanceSqr() > 0.002;
+        return switch (a) {
+            case SMART_VISION -> l >= 4 ? 0.02f : l == 3 ? 0.045f : 0.06f;
+            case CLOAK -> 0.15f * (l == 3 ? 0.45f : l == 2 ? 0.7f : 1f) * (moving ? 3f : 1f);
+            case TITAN -> 0.3f * (l == 3 ? 0.4f : l == 2 ? 0.7f : 1f) * (moving ? 3f : 1f);
+            case FOCUS -> 0.2f;
+            default -> 0f;
+        };
+    }
+
+    static int rechargeDelay(AugData d) { return new int[]{100, 60, 30}[Math.min(2, d.lvl(Aug.SARIF_DELAY))]; }
+    static int regenDelay(AugData d) { return new int[]{100, 60, 30}[Math.min(2, d.lvl(Aug.REGEN_DELAY))]; }
+
+    // ================================================================ passivos (atributos)
+    private static void mod(ServerPlayer p, Holder<Attribute> attr, String key, double amt, AttributeModifier.Operation op) {
+        AttributeInstance inst = p.getAttribute(attr);
+        if (inst == null) return;
+        ResourceLocation id = ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, key);
+        if (amt == 0) inst.removeModifier(id);
+        else inst.addOrUpdateTransientModifier(new AttributeModifier(id, amt, op));
+    }
 
     static void applyPassives(ServerPlayer p) {
         AugData d = AugData.get(p);
         double k = d.potency();
-        int i = 0;
-        for (PassiveMod m : MODS) {
-            AttributeInstance inst = p.getAttribute(m.attr());
-            ResourceLocation id = ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, m.aug().id + "_" + (i++));
-            if (inst == null) continue;
-            if (d.has(m.aug())) inst.addOrUpdateTransientModifier(new AttributeModifier(id, m.amount() * k, m.op()));
-            else inst.removeModifier(id);
-        }
+        boolean arm = d.has(Aug.ARM), leg = d.has(Aug.LEG), klip = d.has(Aug.KLIPSPRINGER);
+        mod(p, Attributes.ATTACK_DAMAGE, "arm_dmg", arm ? 2 * k : 0, AttributeModifier.Operation.ADD_VALUE);
+        mod(p, Attributes.BLOCK_BREAK_SPEED, "arm_mine", arm ? 0.5 * k : 0, AttributeModifier.Operation.ADD_MULTIPLIED_BASE);
+        mod(p, Attributes.ATTACK_SPEED, "qs_atk", d.has(Aug.QUICKSILVER) ? 1.0 * k : 0, AttributeModifier.Operation.ADD_VALUE);
+        mod(p, Attributes.MOVEMENT_SPEED, "leg_speed", leg ? 0.12 * k : 0, AttributeModifier.Operation.ADD_MULTIPLIED_BASE);
+        mod(p, Attributes.STEP_HEIGHT, "leg_step", leg ? 0.4 : 0, AttributeModifier.Operation.ADD_VALUE);
+        mod(p, Attributes.JUMP_STRENGTH, "klip_jump", klip ? 0.22 * k : 0, AttributeModifier.Operation.ADD_VALUE);
+        mod(p, Attributes.SAFE_FALL_DISTANCE, "klip_fall", klip ? 4 : 0, AttributeModifier.Operation.ADD_VALUE);
+        int an = d.lvl(Aug.ANGIOGENESIS);
+        mod(p, Attributes.MAX_HEALTH, "angio", an == 0 ? 0 : an == 1 ? 4 : 10, AttributeModifier.Operation.ADD_VALUE);
+        if (p.getHealth() > p.getMaxHealth()) p.setHealth(p.getMaxHealth());
+        if (d.has(Aug.SILENCERS) && !p.isSilent()) p.setSilent(true);
     }
 
-    // ---------------------------------------------------------------- pedidos do cliente
+    // ================================================================ pedidos do cliente
     public static void handle(ServerPlayer p, Net.Request r) {
         switch (r.op()) {
-            case 0 -> { Aug a = Aug.byId(r.id()); if (a != null) install(p, a); }
+            case 0 -> { Aug a = Aug.byId(r.id()); if (a != null) upgrade(p, a); }
             case 1 -> { Aug a = Aug.byId(r.id()); if (a != null) use(p, a); }
             case 2 -> overclock(p);
             default -> {}
         }
     }
 
-    static void install(ServerPlayer p, Aug a) {
+    static void upgrade(ServerPlayer p, Aug a) {
         AugData d = AugData.get(p);
-        if (d.has(a) || d.praxis < a.cost) return;
-        d.praxis -= a.cost;
-        d.installed.add(a.id);
+        if (!a.canUpgrade(d)) return;
+        int c = a.nextCost(d);
+        if (d.praxis < c) return;
+        d.praxis -= c;
+        d.levels.merge(a.id, 1, Integer::sum);
         p.serverLevel().playSound(null, p.blockPosition(), SoundEvents.BEACON_ACTIVATE, SoundSource.PLAYERS, 1f, 1.5f);
-        p.displayClientMessage(Component.translatable("msg.nanoaug.installed", Component.translatable(a.nameKey())), true);
+        p.displayClientMessage(Component.translatable("msg.nanoaug.installed",
+                Component.translatable(a.levelKey(d.lvl(a)))), true);
         applyPassives(p);
         Net.sync(p);
     }
 
     static void overclock(ServerPlayer p) {
         AugData d = AugData.get(p);
-        if (d.installed.isEmpty() || d.overclock > 0 || d.overheat > 0) return;
+        if (d.levels.isEmpty() || d.overclock > 0 || d.overheat > 0) return;
         if (d.energy < 50f) {
-            p.displayClientMessage(Component.translatable("msg.nanoaug.low_energy"), true);
+            msg(p, "low_energy");
             return;
         }
         d.overclock = AugData.OVERCLOCK_TICKS;
-        d.energy = AugData.MAX_ENERGY;
+        d.energy = d.maxEnergy();
         p.serverLevel().playSound(null, p.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 1f, 0.6f);
-        p.displayClientMessage(Component.translatable("msg.nanoaug.overclock"), true);
+        Fx.ring(p.serverLevel(), p.position(), 1.5);
+        msg(p, "overclock");
         applyPassives(p);
         Net.sync(p);
     }
 
+    static void msg(ServerPlayer p, String key) { p.displayClientMessage(Component.translatable("msg.nanoaug." + key), true); }
+
     static void deactivateAll(ServerPlayer p, AugData d) {
         d.active.clear();
-        p.removeEffect(MobEffects.NIGHT_VISION);
         p.removeEffect(MobEffects.INVISIBILITY);
     }
 
     static void use(ServerPlayer p, Aug a) {
         AugData d = AugData.get(p);
         if (!d.has(a) || a.mode == Aug.Mode.PASSIVE) return;
-        if (d.overheat > 0) {
-            p.displayClientMessage(Component.translatable("msg.nanoaug.offline"), true);
-            return;
-        }
+        if (d.overheat > 0) { msg(p, "offline"); return; }
         ServerLevel lv = p.serverLevel();
 
         if (a.mode == Aug.Mode.TOGGLE) {
             if (d.active.remove(a.id)) {
-                if (a == Aug.SMART_VISION) p.removeEffect(MobEffects.NIGHT_VISION);
                 if (a == Aug.CLOAK) p.removeEffect(MobEffects.INVISIBILITY);
                 lv.playSound(null, p.blockPosition(), SoundEvents.BEACON_DEACTIVATE, SoundSource.PLAYERS, 0.6f, 1.4f);
             } else {
-                if (d.energy < 5f && d.overclock == 0) {
-                    p.displayClientMessage(Component.translatable("msg.nanoaug.low_energy"), true);
-                    return;
-                }
+                if (d.energy < 5f && d.overclock == 0) { msg(p, "low_energy"); return; }
                 d.active.add(a.id);
                 lv.playSound(null, p.blockPosition(), SoundEvents.BEACON_ACTIVATE, SoundSource.PLAYERS, 0.6f, 1.8f);
+                Fx.burst(lv, p.position().add(0, 1, 0), 12);
             }
             Net.sync(p);
             return;
         }
 
-        // ACTION
+        // ---- ACTION
         if (d.cooldowns.getOrDefault(a.id, 0) > 0) return;
         boolean oc = d.overclock > 0;
-        if (!oc && d.energy < a.energy) {
-            p.displayClientMessage(Component.translatable("msg.nanoaug.low_energy"), true);
-            return;
-        }
-        if (!oc) d.energy -= a.energy;
-        d.cooldowns.put(a.id, oc ? a.cooldown / 2 : a.cooldown);
+        float cost = cost(a, d);
+        if (!oc && d.energy < cost) { msg(p, "low_energy"); return; }
         double k = d.potency();
 
-        switch (a) {
-            case ICARUS_DASH -> dash(p, lv, k);
-            case TITAN -> {
-                p.addEffect(new MobEffectInstance(MobEffects.DAMAGE_RESISTANCE, (int) (100 * k), 4, false, false, true));
-                p.addEffect(new MobEffectInstance(MobEffects.ABSORPTION, (int) (100 * k), 1, false, false, true));
-                lv.playSound(null, p.blockPosition(), SoundEvents.ANVIL_LAND, SoundSource.PLAYERS, 0.8f, 0.5f);
-            }
-            case TYPHOON -> typhoon(p, lv, k);
-            case TESLA -> tesla(p, lv, k);
-            case REMOTE_HACK -> {
-                if (!hack(p, lv, k)) { // nada para hackear: devolve a energia
-                    if (!oc) d.energy += a.energy;
-                    d.cooldowns.put(a.id, 0);
-                    p.displayClientMessage(Component.translatable("msg.nanoaug.no_target"), true);
-                }
-            }
-            default -> {}
+        boolean ok = switch (a) {
+            case LIDAR -> mark(p, lv, d);
+            case PUNCH -> punch(p, lv, k);
+            case TAKEDOWN -> takedown(p, lv, d, k);
+            case PEPS -> peps(p, lv, d, k);
+            case REMOTE_HACK -> hack(p, lv, d);
+            case TESLA -> tesla(p, lv, d, k);
+            case NANOBLADE -> blade(p, lv, d, k);
+            case TYPHOON -> typhoon(p, lv, d, k);
+            case ICARUS_DASH -> dash(p, lv, d, k);
+            default -> false;
+        };
+        if (!ok) return;
+
+        if (!oc) {
+            d.energy -= cost;
+            if (d.energy <= 0) { d.energy = 0; d.regenPause = rechargeDelay(d); }
         }
+        d.cooldowns.put(a.id, oc ? cooldown(a) / 2 : cooldown(a));
         Net.sync(p);
     }
 
-    // ---------------------------------------------------------------- ações
-    private static void dash(ServerPlayer p, ServerLevel lv, double k) {
-        Vec3 l = p.getLookAngle();
-        Vec3 h = new Vec3(l.x, 0, l.z);
-        h = h.lengthSqr() < 1e-4 ? new Vec3(0, 0, 1) : h.normalize();
-        h = h.scale(1.6 * k);
-        p.setDeltaMovement(h.x, 0.25 + Math.max(0, l.y) * 0.5, h.z);
-        p.hurtMarked = true;
-        p.fallDistance = 0;
-        lv.sendParticles(ParticleTypes.CLOUD, p.getX(), p.getY() + 0.2, p.getZ(), 14, 0.3, 0.1, 0.3, 0.05);
-        lv.playSound(null, p.blockPosition(), SoundEvents.PHANTOM_SWOOP, SoundSource.PLAYERS, 1f, 1.4f);
-    }
-
-    private static void typhoon(ServerPlayer p, ServerLevel lv, double k) {
-        List<LivingEntity> hit = lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(6),
-                e -> e != p && e.isAlive() && e instanceof Enemy);
-        for (LivingEntity e : hit) {
-            e.hurt(p.damageSources().playerAttack(p), (float) (14 * k));
-            e.knockback(1.2, p.getX() - e.getX(), p.getZ() - e.getZ());
-        }
-        lv.sendParticles(ParticleTypes.EXPLOSION_EMITTER, p.getX(), p.getY() + 1, p.getZ(), 1, 0, 0, 0, 0);
-        lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, 1f, 1.2f);
-    }
-
-    private static void tesla(ServerPlayer p, ServerLevel lv, double k) {
-        List<LivingEntity> hit = lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(5),
-                e -> e != p && e.isAlive() && e instanceof Enemy);
-        for (LivingEntity e : hit) {
-            e.hurt(p.damageSources().playerAttack(p), (float) (4 * k));
-            e.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, (int) (60 * k), 6));
-            e.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, (int) (60 * k), 2));
-            lv.sendParticles(ParticleTypes.ELECTRIC_SPARK, e.getX(), e.getY() + 1, e.getZ(), 20, 0.3, 0.5, 0.3, 0.2);
-        }
-        lv.sendParticles(ParticleTypes.ELECTRIC_SPARK, p.getX(), p.getY() + 1, p.getZ(), 30, 0.6, 0.6, 0.6, 0.3);
-        lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 0.8f, 1.8f);
-    }
-
-    /** Hacking remoto: portas/alavancas/botões à distância ou atordoa um inimigo mirado. */
-    private static boolean hack(ServerPlayer p, ServerLevel lv, double k) {
-        double range = 12;
+    // ================================================================ ações
+    private static Entity rayEntity(ServerPlayer p, ServerLevel lv, double range, Predicate<Entity> filter) {
         Vec3 eye = p.getEyePosition();
         Vec3 end = eye.add(p.getLookAngle().scale(range));
-        HitResult hr = p.pick(range, 1f, false);
-        double blockDist = hr.getType() == HitResult.Type.BLOCK ? hr.getLocation().distanceTo(eye) : 1e9;
-
-        Mob best = null;
-        double bestDist = 1e9;
-        for (Entity e : lv.getEntities(p, new AABB(eye, end).inflate(1), x -> x instanceof Mob && x instanceof Enemy)) {
+        Entity best = null;
+        double bd = Double.MAX_VALUE;
+        for (Entity e : lv.getEntities(p, new AABB(eye, end).inflate(1), filter)) {
             Optional<Vec3> c = e.getBoundingBox().inflate(0.3).clip(eye, end);
             if (c.isPresent()) {
-                double dd = c.get().distanceTo(eye);
-                if (dd < bestDist) { bestDist = dd; best = (Mob) e; }
+                double dd = c.get().distanceToSqr(eye);
+                if (dd < bd) { bd = dd; best = e; }
             }
         }
-        if (best != null && bestDist < blockDist) {
-            best.setTarget(null);
-            best.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, (int) (100 * k), 5));
-            best.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, (int) (100 * k), 3));
-            lv.sendParticles(ParticleTypes.ELECTRIC_SPARK, best.getX(), best.getY() + 1, best.getZ(), 25, 0.3, 0.5, 0.3, 0.2);
-            lv.playSound(null, best.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 0.7f, 2f);
+        return best;
+    }
+
+    private static boolean mark(ServerPlayer p, ServerLevel lv, AugData d) {
+        Entity t = rayEntity(p, lv, 32, e -> e instanceof LivingEntity && !(e instanceof Player));
+        if (t == null) { msg(p, "no_target"); return false; }
+        if (!d.marks.remove(t.getUUID())) {
+            int max = new int[]{10, 25, 40}[d.lvl(Aug.LIDAR) - 1];
+            if (d.marks.size() >= max) { msg(p, "marks_full"); return false; }
+            d.marks.add(t.getUUID());
+        }
+        lv.playSound(null, p.blockPosition(), SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.6f, 1.8f);
+        Fx.burst(lv, t.position().add(0, t.getBbHeight() + 0.3, 0), 8);
+        return true;
+    }
+
+    private static boolean punch(ServerPlayer p, ServerLevel lv, double k) {
+        HitResult hr = p.pick(4.5, 1f, false);
+        if (hr.getType() != HitResult.Type.BLOCK) { msg(p, "no_target"); return false; }
+        BlockHitResult b = (BlockHitResult) hr;
+        boolean any = false;
+        for (int i = 0; i < 2; i++) {
+            BlockPos q = i == 0 ? b.getBlockPos() : b.getBlockPos().relative(b.getDirection().getOpposite());
+            BlockState st = lv.getBlockState(q);
+            float h = st.getDestroySpeed(lv, q);
+            if (!st.isAir() && h >= 0 && h <= 3f * k && lv.mayInteract(p, q)) {
+                lv.destroyBlock(q, true, p);
+                any = true;
+            }
+        }
+        if (!any) { msg(p, "too_hard"); return false; }
+        Fx.burst(lv, b.getLocation(), 20);
+        lv.playSound(null, p.blockPosition(), SoundEvents.ANVIL_LAND, SoundSource.PLAYERS, 0.7f, 0.6f);
+        return true;
+    }
+
+    private static boolean takedown(ServerPlayer p, ServerLevel lv, AugData d, double k) {
+        Entity t = rayEntity(p, lv, 3.6, e -> e instanceof Enemy && e instanceof LivingEntity);
+        if (!(t instanceof LivingEntity first)) { msg(p, "no_target"); return false; }
+        List<LivingEntity> targets = new ArrayList<>();
+        targets.add(first);
+        if (d.lvl(Aug.QUICKSILVER) >= 2) {
+            lv.getEntitiesOfClass(LivingEntity.class, first.getBoundingBox().inflate(3),
+                            o -> o != first && o != p && o instanceof Enemy)
+                    .stream().min(Comparator.comparingDouble(o -> o.distanceToSqr(first)))
+                    .ifPresent(targets::add);
+        }
+        for (LivingEntity v : targets) {
+            v.hurt(p.damageSources().playerAttack(p), (float) (40 * k));
+            if (d.lvl(Aug.TAKEDOWN) >= 2) {
+                Vec3 dir = v.position().subtract(p.position()).normalize();
+                v.setDeltaMovement(dir.x * 1.6, 0.6, dir.z * 1.6);
+                v.hurtMarked = true;
+            }
+            Fx.burst(lv, v.position().add(0, 1, 0), 15);
+        }
+        lv.playSound(null, p.blockPosition(), SoundEvents.PLAYER_ATTACK_CRIT, SoundSource.PLAYERS, 1f, 0.7f);
+        return true;
+    }
+
+    private static boolean peps(ServerPlayer p, ServerLevel lv, AugData d, double k) {
+        Vec3 look = p.getLookAngle();
+        if (p.isShiftKeyDown() && d.lvl(Aug.PEPS) >= 2) { // Precision Diode
+            Entity t = rayEntity(p, lv, 14, e -> e instanceof LivingEntity && e instanceof Enemy);
+            if (!(t instanceof LivingEntity le)) { msg(p, "no_target"); return false; }
+            le.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 200, 9));
+            le.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 200, 9));
+            le.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 200, 0));
+            if (le instanceof Mob m) m.setTarget(null);
+            Fx.arc(lv, p.getEyePosition().add(0, -0.3, 0), le.position().add(0, le.getBbHeight() / 2, 0));
+            lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 0.6f, 2f);
             return true;
         }
-        if (hr instanceof BlockHitResult bhr && hr.getType() == HitResult.Type.BLOCK) {
+        Vec3 flat = new Vec3(look.x, 0, look.z).normalize();
+        for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(7),
+                o -> o != p && o instanceof Enemy)) {
+            Vec3 to = e.position().subtract(p.position());
+            if (to.lengthSqr() < 1e-4 || to.normalize().dot(flat) < 0.5) continue;
+            Vec3 dir = to.normalize();
+            e.hurt(p.damageSources().playerAttack(p), 2f);
+            e.setDeltaMovement(dir.x * 1.8 * k, 0.5, dir.z * 1.8 * k);
+            e.hurtMarked = true;
+        }
+        Vec3 front = p.getEyePosition().add(look.scale(2));
+        Fx.burst(lv, front, 30);
+        Fx.ring(lv, p.position().add(flat.scale(2)), 1.5);
+        lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, 0.5f, 1.8f);
+        return true;
+    }
+
+    /** Hacking remoto: portas/alavancas/botões; nível 2 aumenta alcance; nível 3 desativa inimigo mirado. */
+    private static boolean hack(ServerPlayer p, ServerLevel lv, AugData d) {
+        int l = d.lvl(Aug.REMOTE_HACK);
+        double range = l >= 2 ? 20 : 10;
+        Vec3 eye = p.getEyePosition();
+        HitResult hr = p.pick(range, 1f, false);
+        double bd = hr.getType() == HitResult.Type.BLOCK ? hr.getLocation().distanceTo(eye) : 1e9;
+
+        if (l >= 3) {
+            Entity t = rayEntity(p, lv, range, e -> e instanceof Mob && e instanceof Enemy);
+            if (t instanceof Mob m && p.distanceTo(m) < bd) {
+                m.setTarget(null);
+                m.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 120, 5));
+                m.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 120, 3));
+                Fx.arc(lv, eye.add(0, -0.3, 0), m.position().add(0, m.getBbHeight() / 2, 0));
+                lv.playSound(null, m.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 0.7f, 2f);
+                return true;
+            }
+        }
+        if (hr.getType() == HitResult.Type.BLOCK) {
+            BlockHitResult bhr = (BlockHitResult) hr;
             BlockPos pos = bhr.getBlockPos();
             BlockState st = lv.getBlockState(pos);
             Block b = st.getBlock();
@@ -252,110 +366,246 @@ public class Logic {
             } else if (b instanceof LeverBlock || b instanceof ButtonBlock || b instanceof FenceGateBlock) {
                 st.useWithoutItem(lv, p, bhr);
                 ok = true;
+            } else if (l >= 2 && b instanceof RedstoneLampBlock) {
+                lv.setBlock(pos, st.cycle(RedstoneLampBlock.LIT), 3);
+                ok = true;
             }
             if (ok) {
-                lv.sendParticles(ParticleTypes.ELECTRIC_SPARK, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 15, 0.3, 0.3, 0.3, 0.1);
+                Fx.arc(lv, eye.add(0, -0.3, 0), Vec3.atCenterOf(pos));
                 return true;
             }
         }
+        msg(p, "no_target");
         return false;
     }
 
-    // ---------------------------------------------------------------- tick
+    private static boolean tesla(ServerPlayer p, ServerLevel lv, AugData d, double k) {
+        int n = new int[]{1, 2, 4}[d.lvl(Aug.TESLA) - 1];
+        double range = 8 * (1 + d.lvl(Aug.TESLA_RANGE));
+        List<LivingEntity> list = lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(range),
+                o -> o != p && o.isAlive() && o instanceof Enemy && o.distanceTo(p) <= range && p.hasLineOfSight(o));
+        list.sort(Comparator.comparingDouble(o -> o.distanceToSqr(p)));
+        if (list.isEmpty()) { msg(p, "no_target"); return false; }
+        Vec3 from = p.getEyePosition().add(0, -0.4, 0);
+        for (int i = 0; i < Math.min(n, list.size()); i++) {
+            LivingEntity e = list.get(i);
+            e.hurt(p.damageSources().playerAttack(p), (float) (4 * k));
+            e.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, (int) (80 * k), 6));
+            e.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, (int) (80 * k), 2));
+            Fx.arc(lv, from, e.position().add(0, e.getBbHeight() / 2, 0));
+        }
+        lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 0.8f, 1.8f);
+        return true;
+    }
+
+    private static boolean blade(ServerPlayer p, ServerLevel lv, AugData d, double k) {
+        int l = d.lvl(Aug.NANOBLADE);
+        Arrow a = new Arrow(EntityType.ARROW, lv);
+        a.setOwner(p);
+        a.setPos(p.getX(), p.getEyeY() - 0.1, p.getZ());
+        a.shootFromRotation(p, p.getXRot(), p.getYRot(), 0f, l >= 2 ? 4.5f : 3.5f, 0f);
+        a.setBaseDamage((l >= 2 ? 9 : 6) * k);
+        a.setCritArrow(true);
+        a.pickup = AbstractArrow.Pickup.DISALLOWED;
+        if (l >= 3) a.addTag("nanoaug_explosive");
+        lv.addFreshEntity(a);
+        lv.playSound(null, p.blockPosition(), SoundEvents.ARROW_SHOOT, SoundSource.PLAYERS, 1f, 1.6f);
+        return true;
+    }
+
+    private static boolean typhoon(ServerPlayer p, ServerLevel lv, AugData d, double k) {
+        if (d.has(Aug.TYPHOON_LETHAL)) {
+            for (int i = 0; i < 16; i++) {
+                Arrow a = new Arrow(EntityType.ARROW, lv);
+                a.setOwner(p);
+                a.setPos(p.getX(), p.getEyeY() - 0.3, p.getZ());
+                a.shootFromRotation(p, 0f, i * 22.5f, 0f, 2.2f, 0f);
+                a.setBaseDamage(5 * k);
+                a.pickup = AbstractArrow.Pickup.DISALLOWED;
+                lv.addFreshEntity(a);
+            }
+        } else if (d.has(Aug.TYPHOON_STUN)) {
+            for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(8),
+                    o -> o != p && o instanceof Enemy)) {
+                e.hurt(p.damageSources().playerAttack(p), 1f);
+                e.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, (int) (100 * k), 6));
+                e.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, (int) (100 * k), 3));
+            }
+        } else {
+            msg(p, "choose_config");
+            return false;
+        }
+        Fx.ring(lv, p.position(), 3);
+        Fx.ring(lv, p.position().add(0, 0.6, 0), 5);
+        lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.PLAYERS, 1f, 1.2f);
+        return true;
+    }
+
+    private static boolean dash(ServerPlayer p, ServerLevel lv, AugData d, double k) {
+        int l = d.lvl(Aug.ICARUS_DASH);
+        Vec3 look = p.getLookAngle();
+        Vec3 h = new Vec3(look.x, 0, look.z);
+        h = h.lengthSqr() < 1e-4 ? new Vec3(0, 0, 1) : h.normalize();
+        double power = (l >= 2 ? 1.9 : 1.6) * k;
+        Vec3 start = p.position();
+        if (l >= 3) { // Charged Dash: derruba inimigos no caminho
+            for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class,
+                    p.getBoundingBox().expandTowards(h.scale(5)).inflate(1), o -> o != p && o instanceof Enemy)) {
+                e.hurt(p.damageSources().playerAttack(p), (float) (6 * k));
+                e.setDeltaMovement(h.x * 1.2, 0.4, h.z * 1.2);
+                e.hurtMarked = true;
+            }
+        }
+        p.setDeltaMovement(h.x * power, 0.25 + Math.max(0, look.y) * 0.5, h.z * power);
+        p.hurtMarked = true;
+        p.fallDistance = 0;
+        Fx.trail(lv, start, h);
+        lv.playSound(null, p.blockPosition(), SoundEvents.PHANTOM_SWOOP, SoundSource.PLAYERS, 1f, 1.4f);
+        return true;
+    }
+
+    // ================================================================ tick
     @SubscribeEvent
     public static void tick(PlayerTickEvent.Post e) {
         if (!(e.getEntity() instanceof ServerPlayer p)) return;
         AugData d = AugData.get(p);
-        if (d.installed.isEmpty()) return;
+        if (d.levels.isEmpty()) return;
+        ServerLevel lv = p.serverLevel();
+        float max = d.maxEnergy();
 
         d.cooldowns.replaceAll((key, v) -> Math.max(0, v - 1));
 
         if (d.overheat > 0) {
-            d.overheat--;
-            if (d.overheat == 0) p.displayClientMessage(Component.translatable("msg.nanoaug.online"), true);
+            if (--d.overheat == 0) msg(p, "online");
         } else if (d.overclock > 0) {
+            d.energy = max;
             if (--d.overclock == 0) { // fim do overclock -> sobreaquecimento
                 d.overheat = AugData.OVERHEAT_TICKS;
                 d.energy = 0;
                 deactivateAll(p, d);
                 p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 100, 1));
-                p.serverLevel().playSound(null, p.blockPosition(), SoundEvents.BEACON_DEACTIVATE, SoundSource.PLAYERS, 1f, 0.5f);
-                p.displayClientMessage(Component.translatable("msg.nanoaug.overheat"), true);
+                lv.playSound(null, p.blockPosition(), SoundEvents.BEACON_DEACTIVATE, SoundSource.PLAYERS, 1f, 0.5f);
+                msg(p, "overheat");
                 applyPassives(p);
             }
         } else {
-            d.energy = Math.min(AugData.MAX_ENERGY, d.energy + 0.25f);
+            if (d.regenPause > 0) d.regenPause--;
+            else if (d.active.isEmpty())
+                d.energy = Math.min(max, d.energy + 0.25f * (1f + 0.5f * d.lvl(Aug.SARIF_RATE)));
         }
 
-        // gasto contínuo dos aprimoramentos ligados
+        // gasto contínuo dos augs ligados
         if (d.overclock == 0 && !d.active.isEmpty()) {
-            float drain = 0;
+            float dr = 0;
             for (String id : d.active) {
                 Aug a = Aug.byId(id);
-                if (a != null) drain += a.energy;
+                if (a != null) dr += drain(a, d, p);
             }
-            d.energy -= drain;
+            d.energy -= dr;
             if (d.energy <= 0) {
                 d.energy = 0;
+                d.regenPause = rechargeDelay(d);
                 deactivateAll(p, d);
-                p.displayClientMessage(Component.translatable("msg.nanoaug.low_energy"), true);
+                msg(p, "low_energy");
             }
         }
 
         if (d.active(Aug.CLOAK))
             p.addEffect(new MobEffectInstance(MobEffects.INVISIBILITY, 20, 0, false, false, false));
+        if (d.active(Aug.TITAN))
+            p.addEffect(new MobEffectInstance(MobEffects.DAMAGE_RESISTANCE, 5, 4, false, false, false));
+
+        // Rebreather
+        if (d.has(Aug.REBREATHER) && d.overheat == 0 && p.isUnderWater() && (d.overclock > 0 || d.energy > 0.5f)) {
+            if (p.getAirSupply() < p.getMaxAirSupply()) p.setAirSupply(p.getMaxAirSupply());
+            if (d.overclock == 0) {
+                d.energy = Math.max(0, d.energy - 0.03f);
+                d.regenPause = Math.max(d.regenPause, 20);
+            }
+        }
+
+        // Sentinel RX: regeneração
+        int sl = d.lvl(Aug.SENTINEL);
+        if (sl > 0 && p.tickCount % 20 == 0 && p.getHealth() < p.getMaxHealth()
+                && p.tickCount - d.lastHurt >= regenDelay(d))
+            p.heal((float) (new float[]{0.5f, 1f, 2f}[sl - 1] * d.potency()));
 
         if (p.tickCount % 10 == 0) {
             applyPassives(p);
+            if (d.lvl(Aug.REBREATHER) >= 2) p.removeEffect(MobEffects.POISON);
+
             if (d.active(Aug.SMART_VISION)) {
-                p.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 400, 0, false, false, false));
-                for (Monster m : p.level().getEntitiesOfClass(Monster.class, p.getBoundingBox().inflate(24)))
-                    m.addEffect(new MobEffectInstance(MobEffects.GLOWING, 30, 0, false, false, false));
+                int l = d.lvl(Aug.SMART_VISION);
+                double r = l >= 2 ? 24 : 16;
+                for (Mob m : lv.getEntitiesOfClass(Mob.class, p.getBoundingBox().inflate(r), o -> o instanceof Enemy))
+                    if (l >= 2 || p.hasLineOfSight(m))
+                        m.addEffect(new MobEffectInstance(MobEffects.GLOWING, 30, 0, false, false, false));
+            }
+            if (d.has(Aug.MAGPIE)) {
+                boolean on = d.active(Aug.SMART_VISION);
+                for (ItemEntity it : lv.getEntitiesOfClass(ItemEntity.class, p.getBoundingBox().inflate(40)))
+                    it.setGlowingTag(on && it.distanceTo(p) <= 16);
+            }
+            if (!d.marks.isEmpty()) {
+                Iterator<UUID> it = d.marks.iterator();
+                while (it.hasNext()) {
+                    Entity m = lv.getEntity(it.next());
+                    if (m instanceof LivingEntity le && le.isAlive())
+                        le.addEffect(new MobEffectInstance(MobEffects.GLOWING, 30, 0, false, false, false));
+                    else it.remove();
+                }
+            }
+            if (d.active(Aug.FOCUS)) {
+                int l = d.lvl(Aug.FOCUS);
+                for (Mob m : lv.getEntitiesOfClass(Mob.class, p.getBoundingBox().inflate(l >= 2 ? 20 : 14), o -> o instanceof Enemy))
+                    m.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 25, l >= 2 ? 4 : 2, false, false, false));
+                p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 25, 1, false, false, false));
+                p.addEffect(new MobEffectInstance(MobEffects.DIG_SPEED, 25, 1, false, false, false));
             }
         }
-        if (d.has(Aug.NANO_REPAIR) && p.tickCount % 40 == 0 && p.getHealth() < p.getMaxHealth())
-            p.heal((float) d.potency());
-
         if (p.tickCount % 5 == 0) Net.sync(p);
     }
 
-    // ---------------------------------------------------------------- eventos de combate
+    // ================================================================ eventos de combate
     @SubscribeEvent
     public static void fall(LivingFallEvent e) {
         if (!(e.getEntity() instanceof ServerPlayer p)) return;
         AugData d = AugData.get(p);
-        if (!d.has(Aug.ICARUS_LANDING)) return;
+        int l = d.lvl(Aug.ICARUS_LANDING);
+        if (l == 0) return;
         float dist = e.getDistance();
-        if (dist < 3) return;
-        if (d.overclock == 0) {
-            if (d.energy < 10f) return; // sem energia, leva dano normal
-            d.energy -= 10f;
-        }
         e.setDamageMultiplier(0f);
-        if (dist >= 5) {
+        if (l >= 2 && dist >= 5) { // Icarus Strike
             ServerLevel lv = p.serverLevel();
             for (LivingEntity t : lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(4),
-                    x -> x != p && x instanceof Enemy))
+                    o -> o != p && o instanceof Enemy)) {
                 t.hurt(p.damageSources().playerAttack(p), (float) (dist * 0.8 * d.potency()));
-            lv.sendParticles(ParticleTypes.EXPLOSION, p.getX(), p.getY() + 0.2, p.getZ(), 6, 1.2, 0.1, 1.2, 0);
-            lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 0.8f, 1.4f);
+                t.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 60, 5));
+            }
+            Fx.ring(lv, p.position(), 2);
+            Fx.ring(lv, p.position(), 4);
+            Fx.burst(lv, p.position().add(0, 0.3, 0), 30);
+            lv.playSound(null, p.blockPosition(), SoundEvents.LIGHTNING_BOLT_IMPACT, SoundSource.PLAYERS, 0.9f, 1.2f);
         }
-        Net.sync(p);
     }
 
     @SubscribeEvent
     public static void incomingDamage(LivingIncomingDamageEvent e) {
         if (e.getEntity() instanceof Player victim) {
             AugData d = AugData.get(victim);
-            if (d.has(Aug.BLAST_SKIN)) {
-                if (e.getSource().is(DamageTypeTags.IS_EXPLOSION)) e.setAmount(e.getAmount() * 0.4f);
-                else if (e.getSource().is(DamageTypeTags.IS_FIRE)) e.setAmount(e.getAmount() * 0.6f);
-            }
+            d.lastHurt = victim.tickCount;
+            int r = d.lvl(Aug.RHINO);
+            if (r > 0 && !e.getSource().is(DamageTypeTags.BYPASSES_ARMOR))
+                e.setAmount(e.getAmount() * (1f - new float[]{0.20f, 0.33f, 0.50f}[r - 1]));
+            if (d.has(Aug.EMP_SHIELD) && e.getSource().is(DamageTypeTags.IS_LIGHTNING)) e.setAmount(0f);
         }
-        if (e.getSource().getEntity() instanceof Player atk && e.getSource().getDirectEntity() == atk
-                && atk.getMainHandItem().isEmpty()) {
+        if (e.getSource().getEntity() instanceof ServerPlayer atk && e.getSource().getDirectEntity() == atk) {
             AugData d = AugData.get(atk);
-            if (d.has(Aug.NANO_BLADE)) e.setAmount(e.getAmount() + (float) (5 * d.potency()));
+            if (d.active(Aug.CLOAK) && !d.has(Aug.CLOAK_TAKEDOWN)) { // atacar desfaz a camuflagem
+                d.active.remove(Aug.CLOAK.id);
+                atk.removeEffect(MobEffects.INVISIBILITY);
+                Net.sync(atk);
+            }
         }
     }
 
@@ -365,13 +615,34 @@ public class Logic {
             e.setNewAboutToBeSetTarget(null);
     }
 
-    // ---------------------------------------------------------------- CASIE: desconto com aldeões
+    @SubscribeEvent
+    public static void impact(ProjectileImpactEvent e) {
+        Entity pr = e.getProjectile();
+        if (pr.level().isClientSide || !pr.getTags().contains("nanoaug_explosive")) return;
+        pr.removeTag("nanoaug_explosive");
+        pr.level().explode(pr, pr.getX(), pr.getY(), pr.getZ(), 2.4f, Level.ExplosionInteraction.NONE);
+    }
+
+    /** Reload Speed Dexterity: arcos, bestas e tridentes carregam mais rápido. */
+    @SubscribeEvent
+    public static void useTick(LivingEntityUseItemEvent.Tick e) {
+        if (!(e.getEntity() instanceof Player p)) return;
+        int l = AugData.get(p).lvl(Aug.RELOAD);
+        if (l == 0) return;
+        Item it = e.getItem().getItem();
+        if ((it instanceof BowItem || it instanceof CrossbowItem || it instanceof TridentItem)
+                && (l >= 2 || p.tickCount % 2 == 0))
+            e.setDuration(e.getDuration() - 1);
+    }
+
+    // ================================================================ CASIE: desconto com aldeões
     @SubscribeEvent
     public static void tradeOpen(PlayerContainerEvent.Open e) {
         if (!(e.getEntity() instanceof ServerPlayer p) || !(e.getContainer() instanceof MerchantMenu mm)) return;
         AugData d = AugData.get(p);
-        if (!d.has(Aug.SOCIAL)) return;
-        double pct = 0.30 * d.potency();
+        int l = d.lvl(Aug.SOCIAL);
+        if (l == 0) return;
+        double pct = (l >= 2 ? 0.30 : 0.15) * d.potency();
         for (MerchantOffer o : mm.getOffers()) {
             int n = (int) Math.ceil(o.getBaseCostA().getCount() * pct);
             n = Math.min(n, o.getCostA().getCount() - 1);
@@ -379,7 +650,7 @@ public class Logic {
         }
     }
 
-    // ---------------------------------------------------------------- Kits Praxis pelo mundo
+    // ================================================================ Kits Praxis pelo mundo
     private static final Map<String, Float> LOOT = Map.ofEntries(
             Map.entry("ancient_city", 0.35f), Map.entry("stronghold", 0.30f), Map.entry("bastion", 0.35f),
             Map.entry("end_city", 0.40f), Map.entry("trial_chambers", 0.30f), Map.entry("woodland_mansion", 0.35f),
@@ -419,7 +690,7 @@ public class Logic {
                     new ItemStack(NanoAug.PRAXIS_KIT.get(), n)));
     }
 
-    // ---------------------------------------------------------------- sincronização
+    // ================================================================ sincronização
     @SubscribeEvent public static void login(PlayerEvent.PlayerLoggedInEvent e) {
         if (e.getEntity() instanceof ServerPlayer p) { applyPassives(p); Net.sync(p); }
     }
