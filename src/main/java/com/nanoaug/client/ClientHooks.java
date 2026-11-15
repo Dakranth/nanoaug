@@ -18,5 +18,6 @@ public class ClientHooks {
         d.energy = s.energy();
         d.overclock = s.overclock();
         d.overheat = s.overheat();
+        for (int i = 0; i < 4; i++) d.slots[i] = i < s.slots().size() ? s.slots().get(i) : "";
     }
 }

@@ -36,7 +36,7 @@ public class AugHud {
 
         // ---- barra de energia + lista de augs usáveis (esquerda embaixo)
         List<Aug> acts = new ArrayList<>();
-        for (Aug a : Aug.values()) if (d.has(a) && a.mode != Aug.Mode.PASSIVE) acts.add(a);
+        for (int i = 0; i < 4; i++) { Aug sa = d.slotAug(i); if (sa != null && d.has(sa)) acts.add(sa); }
         boolean recent = mc.level != null && mc.level.getGameTime() - lastUse < 100;
         boolean busy = d.overheat > 0 || d.overclock > 0 || !d.active.isEmpty() || d.energy < d.maxEnergy() - 0.5f;
         if (!acts.isEmpty() && (recent || busy)) {
@@ -58,7 +58,7 @@ public class AugHud {
 
             int y = rowsY;
             for (Aug a : recent ? acts : new ArrayList<Aug>()) {
-                KeyMapping key = ClientSetup.KEYS.get(a);
+                KeyMapping key = ClientSetup.SLOTS[d.slotOf(a)];
                 int c = off ? RED : d.active(a) ? GREEN
                         : (!oc && a.mode == Aug.Mode.ACTION && d.energy < Logic.cost(a, d)) ? GRAY : AMBER;
                 Component line = Component.literal("[").append(key.getTranslatedKeyMessage()).append("] ")

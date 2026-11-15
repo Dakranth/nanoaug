@@ -87,7 +87,7 @@ public class AugScreen extends Screen {
         g.drawString(font, Component.translatable("gui.nanoaug.energy", (int) d.energy, (int) d.maxEnergy()), 12, 34,
                 d.overheat > 0 ? RED : AMBER, true);
         g.drawString(font, Component.translatable("gui.nanoaug.overclock_hint",
-                ClientSetup.OVERCLOCK.getTranslatedKeyMessage()), 12, 46, GRAY, true);
+                ClientSetup.OVERCLOCK.getTranslatedKeyMessage()), 12, height - 12, GRAY, true);
 
         // corpo
         g.renderOutline(bx - 30, cy - 100, 60, 175, 0x66F0B83A);
@@ -151,22 +151,29 @@ public class AugScreen extends Screen {
 
         // botões
         int bY = py + PH - 20;
-        boolean useBtn = sel.mode != Aug.Mode.PASSIVE && d.has(sel);
+        boolean useBtn = false;
         int w1 = useBtn ? (PW - 20) / 2 : PW - 16;
         boolean canUp = sel.canUpgrade(d) && d.praxis >= sel.nextCost(d);
         boolean hov1 = canUp && in(mx, my, px + 8, bY, w1, 14);
         g.fill(px + 8, bY, px + 8 + w1, bY + 14, hov1 ? 0xFF6B5410 : 0xAA1A1405);
         g.renderOutline(px + 8, bY, w1, 14, canUp ? GOLD : 0xFF444444);
         g.drawCenteredString(font, upgradeLabel(d), px + 8 + w1 / 2, bY + 3, canUp ? GOLD : GRAY);
-        if (useBtn) {
-            int x2 = px + 12 + w1;
-            boolean hov2 = in(mx, my, x2, bY, w1, 14);
-            g.fill(x2, bY, x2 + w1, bY + 14, hov2 ? 0xFF6B5410 : 0xAA1A1405);
-            g.renderOutline(x2, bY, w1, 14, GOLD);
-            Component lab = sel.mode == Aug.Mode.TOGGLE
-                    ? Component.translatable(d.active(sel) ? "gui.nanoaug.turn_off" : "gui.nanoaug.turn_on")
-                    : Component.translatable("gui.nanoaug.use", ClientSetup.KEYS.get(sel).getTranslatedKeyMessage());
-            g.drawCenteredString(font, lab, x2 + w1 / 2, bY + 3, GOLD);
+        // ---- 4 slots de uso (Z X C V)
+        for (int i = 0; i < 4; i++) {
+            int sx = bx - 100 + i * 52, sy = cy + 82;
+            Aug sa = d.slotAug(i);
+            boolean hov = in(mx, my, sx, sy, 48, 22);
+            g.fill(sx, sy, sx + 48, sy + 22, hov ? 0xCC3A2E08 : 0xAA0A0A0A);
+            g.renderOutline(sx, sy, 48, 22, sa != null ? GOLD : 0xFF555555);
+            g.drawString(font, "[" + ClientSetup.SLOTS[i].getTranslatedKeyMessage().getString() + "]", sx + 3, sy + 2, AMBER, false);
+            if (sa != null)
+                g.drawString(font, font.plainSubstrByWidth(Component.translatable(sa.nameKey()).getString(), 44), sx + 3, sy + 12, GOLD, false);
+        }
+        g.drawString(font, Component.translatable("gui.nanoaug.slots_hint"), bx - 100, cy + 108, GRAY, false);
+        for (int i = 0; i < 4; i++) {
+            Aug sa = d.slotAug(i);
+            if (sa != null && in(mx, my, bx - 100 + i * 52, cy + 82, 48, 22))
+                g.renderTooltip(font, Component.translatable(sa.nameKey()), mx, my);
         }
     }
 
@@ -176,6 +183,21 @@ public class AugScreen extends Screen {
         if (p == null) return false;
         AugData d = AugData.get(p);
 
+        for (int i = 0; i < 4; i++) {
+            if (in(mx, my, bx() - 100 + i * 52, cy() + 82, 48, 22)) {
+                Aug cur = d.slotAug(i);
+                if (btn == 1) {
+                    PacketDistributor.sendToServer(new Net.Request(i + ":", (byte) 3));
+                } else if (sel.mode != Aug.Mode.PASSIVE && d.has(sel)) {
+                    PacketDistributor.sendToServer(new Net.Request(i + ":" + sel.id, (byte) 3));
+                } else if (cur != null) {
+                    sel = cur;
+                    slot = cur.slot;
+                    scroll = 0;
+                }
+                return true;
+            }
+        }
         for (Aug.Slot s : Aug.Slot.values()) {
             int[] n = node(s);
             if (in(mx, my, n[0], n[1], 48, 16)) {
@@ -194,15 +216,11 @@ public class AugScreen extends Screen {
             }
         }
         int bY = py + PH - 20;
-        boolean useBtn = sel.mode != Aug.Mode.PASSIVE && d.has(sel);
+        boolean useBtn = false;
         int w1 = useBtn ? (PW - 20) / 2 : PW - 16;
         if (in(mx, my, px + 8, bY, w1, 14)) {
             if (sel.canUpgrade(d) && d.praxis >= sel.nextCost(d))
                 PacketDistributor.sendToServer(new Net.Request(sel.id, (byte) 0));
-            return true;
-        }
-        if (useBtn && in(mx, my, px + 12 + w1, bY, w1, 14)) {
-            PacketDistributor.sendToServer(new Net.Request(sel.id, (byte) 1));
             return true;
         }
         return super.mouseClicked(mx, my, btn);

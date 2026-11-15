@@ -46,4 +46,13 @@ public final class Fx {
             lv.sendParticles(YELLOW, p.x, p.y + 0.9, p.z, 2, 0.15, 0.4, 0.15, 0);
         }
     }
+
+    /** Linha de faíscas entre dois pontos (rastro do dash mirado). */
+    public static void line(ServerLevel lv, Vec3 a, Vec3 b) {
+        int n = Math.max(6, (int) (a.distanceTo(b) * 2.5));
+        for (int i = 0; i <= n; i++) {
+            double t = i / (double) n;
+            lv.sendParticles(YELLOW, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, 2, 0.2, 0.4, 0.2, 0);
+        }
+    }
 }

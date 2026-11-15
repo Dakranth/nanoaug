@@ -16,7 +16,8 @@ public class AugData {
             Codec.STRING.listOf().optionalFieldOf("active", List.of()).forGetter(d -> new ArrayList<>(d.active)),
             Codec.FLOAT.optionalFieldOf("energy", 100f).forGetter(d -> d.energy),
             Codec.INT.optionalFieldOf("overclock", 0).forGetter(d -> d.overclock),
-            Codec.INT.optionalFieldOf("overheat", 0).forGetter(d -> d.overheat)
+            Codec.INT.optionalFieldOf("overheat", 0).forGetter(d -> d.overheat),
+            Codec.STRING.listOf().optionalFieldOf("slots", List.of()).forGetter(d -> Arrays.asList(d.slots))
     ).apply(i, AugData::new));
 
     public int praxis;
@@ -25,6 +26,8 @@ public class AugData {
     public float energy = 100f;
     public int overclock;
     public int overheat;
+    /** 4 slots de uso (ids de aug; vazio = livre). */
+    public final String[] slots = {"", "", "", ""};
 
     // só no servidor, não é salvo
     public final Map<String, Integer> cooldowns = new HashMap<>();
@@ -33,13 +36,14 @@ public class AugData {
 
     public AugData() {}
 
-    public AugData(int praxis, Map<String, Integer> lv, List<String> act, float energy, int oc, int oh) {
+    public AugData(int praxis, Map<String, Integer> lv, List<String> act, float energy, int oc, int oh, List<String> sl) {
         this.praxis = praxis;
         this.levels.putAll(lv);
         this.active.addAll(act);
         this.energy = energy;
         this.overclock = oc;
         this.overheat = oh;
+        for (int i = 0; i < 4 && i < sl.size(); i++) this.slots[i] = sl.get(i);
     }
 
     public static AugData get(Player p) { return p.getData(NanoAug.AUG_DATA.get()); }
@@ -50,6 +54,11 @@ public class AugData {
     public boolean any(Aug.Slot s) {
         for (Aug a : Aug.of(s)) if (has(a)) return true;
         return false;
+    }
+    public Aug slotAug(int i) { return Aug.byId(slots[i]); }
+    public int slotOf(Aug a) {
+        for (int i = 0; i < 4; i++) if (a.id.equals(slots[i])) return i;
+        return 0;
     }
     public double potency() { return overclock > 0 ? 1.5 : 1.0; }
     public float maxEnergy() { return 100f * (1f + 0.25f * lvl(Aug.SARIF_CAPACITY)); }

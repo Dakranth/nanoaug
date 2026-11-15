@@ -24,8 +24,8 @@ public enum Aug {
     REBREATHER("rebreather", Slot.TORSO, Mode.PASSIVE, null, 0, null, 2, 0),
     // ---- BRAÇOS
     ARM("arm", Slot.ARMS, Mode.PASSIVE, null, 0, null, 2),
-    PUNCH("punch", Slot.ARMS, Mode.ACTION, "arm", 1, null, 1),
-    TAKEDOWN("takedown", Slot.ARMS, Mode.ACTION, "arm", 1, null, 0, 1),
+    PUNCH("punch", Slot.ARMS, Mode.PASSIVE, "arm", 1, null, 1, 1),
+    TAKEDOWN("takedown", Slot.ARMS, Mode.PASSIVE, "arm", 1, null, 0, 1),
     RELOAD("reload", Slot.ARMS, Mode.PASSIVE, "arm", 1, null, 1, 1),
     PEPS("peps", Slot.ARMS, Mode.ACTION, null, 0, null, 2, 1),
     REMOTE_HACK("remote_hack", Slot.ARMS, Mode.ACTION, null, 0, null, 2, 0, 1),
@@ -38,7 +38,6 @@ public enum Aug {
     TYPHOON("typhoon", Slot.BACK, Mode.ACTION, null, 0, null, 2),
     TYPHOON_LETHAL("typhoon_lethal", Slot.BACK, Mode.PASSIVE, "typhoon", 1, "typhoon_stun", 0),
     TYPHOON_STUN("typhoon_stun", Slot.BACK, Mode.PASSIVE, "typhoon", 1, "typhoon_lethal", 0),
-    FOCUS("focus", Slot.BACK, Mode.TOGGLE, null, 0, null, 2, 0),
     ICARUS_DASH("icarus_dash", Slot.BACK, Mode.ACTION, null, 0, null, 2, 0, 1),
     // ---- PELE
     CLOAK("cloak", Slot.SKIN, Mode.TOGGLE, null, 0, null, 2, 1, 1),

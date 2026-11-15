@@ -1,6 +1,7 @@
 package com.nanoaug;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -8,6 +9,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -32,6 +34,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TridentItem;
 import net.minecraft.world.item.trading.MerchantOffer;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
@@ -47,6 +50,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.LootTableLoadEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
+import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.entity.living.LivingChangeTargetEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
@@ -62,11 +66,13 @@ import java.util.function.Predicate;
 @EventBusSubscriber(modid = NanoAug.MODID)
 public class Logic {
 
+    private static boolean chaining;
+
     // ================================================================ números do jogo
     /** Custo de energia por uso (augs ACTION). */
     public static float cost(Aug a, AugData d) {
         return switch (a) {
-            case PUNCH, TAKEDOWN, NANOBLADE -> 25f;
+            case NANOBLADE -> 25f;
             case PEPS -> 30f;
             case REMOTE_HACK -> 15f;
             case TESLA -> 35f;
@@ -78,8 +84,6 @@ public class Logic {
 
     static int cooldown(Aug a) {
         return switch (a) {
-            case PUNCH -> 20;
-            case TAKEDOWN -> 30;
             case PEPS, REMOTE_HACK -> 40;
             case TESLA -> 100;
             case NANOBLADE -> 20;
@@ -97,7 +101,6 @@ public class Logic {
             case SMART_VISION -> l >= 4 ? 0.02f : l == 3 ? 0.045f : 0.06f;
             case CLOAK -> 0.15f * (l == 3 ? 0.45f : l == 2 ? 0.7f : 1f) * (moving ? 3f : 1f);
             case TITAN -> 0.3f * (l == 3 ? 0.4f : l == 2 ? 0.7f : 1f) * (moving ? 3f : 1f);
-            case FOCUS -> 0.2f;
             default -> 0f;
         };
     }
@@ -137,6 +140,8 @@ public class Logic {
             case 0 -> { Aug a = Aug.byId(r.id()); if (a != null) upgrade(p, a); }
             case 1 -> { Aug a = Aug.byId(r.id()); if (a != null) use(p, a); }
             case 2 -> overclock(p);
+            case 3 -> equip(p, r.id());
+            case 5 -> dashAimed(p);
             default -> {}
         }
     }
@@ -148,6 +153,11 @@ public class Logic {
         if (d.praxis < c) return;
         d.praxis -= c;
         d.levels.merge(a.id, 1, Integer::sum);
+        if (a.mode != Aug.Mode.PASSIVE && d.lvl(a) == 1) { // equipa no primeiro slot livre
+            boolean already = false;
+            for (String sl : d.slots) if (a.id.equals(sl)) already = true;
+            if (!already) for (int i = 0; i < 4; i++) if (d.slots[i].isEmpty()) { d.slots[i] = a.id; break; }
+        }
         p.serverLevel().playSound(null, p.blockPosition(), SoundEvents.BEACON_ACTIVATE, SoundSource.PLAYERS, 1f, 1.5f);
         p.displayClientMessage(Component.translatable("msg.nanoaug.installed",
                 Component.translatable(a.levelKey(d.lvl(a)))), true);
@@ -168,6 +178,121 @@ public class Logic {
         Fx.ring(p.serverLevel(), p.position(), 1.5);
         msg(p, "overclock");
         applyPassives(p);
+        Net.sync(p);
+    }
+
+    static void equip(ServerPlayer p, String spec) {
+        AugData d = AugData.get(p);
+        String[] sp = spec.split(":", 2);
+        int i;
+        try { i = Integer.parseInt(sp[0]); } catch (NumberFormatException ex) { return; }
+        if (i < 0 || i >= 4) return;
+        String id = sp.length > 1 ? sp[1] : "";
+        if (id.isEmpty()) { d.slots[i] = ""; Net.sync(p); return; }
+        Aug a = Aug.byId(id);
+        if (a == null || a.mode == Aug.Mode.PASSIVE || !d.has(a)) return;
+        for (int j = 0; j < 4; j++) if (a.id.equals(d.slots[j])) d.slots[j] = "";
+        d.slots[i] = a.id;
+        Net.sync(p);
+    }
+
+    /** Icarus Dash segurado e solto: vai até o ponto mirado (ver DashAim). */
+    static void dashAimed(ServerPlayer p) {
+        AugData d = AugData.get(p);
+        Aug a = Aug.ICARUS_DASH;
+        if (!d.has(a)) return;
+        if (d.overheat > 0) { msg(p, "offline"); return; }
+        if (d.cooldowns.getOrDefault(a.id, 0) > 0) return;
+        boolean oc = d.overclock > 0;
+        float cost = cost(a, d);
+        if (!oc && d.energy < cost) { msg(p, "low_energy"); return; }
+        double k = d.potency();
+        Vec3 t = DashAim.compute(p, DashAim.range(d.lvl(a)) * k);
+        if (t == null) { msg(p, "no_spot"); return; }
+        ServerLevel lv = p.serverLevel();
+        Vec3 start = p.position();
+        if (d.lvl(a) >= 3) { // Charged Dash: derruba inimigos no caminho
+            for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class,
+                    new AABB(start, t).inflate(1.6), o -> o != p && o instanceof Enemy)) {
+                e.hurt(p.damageSources().playerAttack(p), (float) (6 * k));
+                Vec3 dir = t.subtract(start).normalize();
+                e.setDeltaMovement(dir.x * 1.2, 0.4, dir.z * 1.2);
+                e.hurtMarked = true;
+            }
+        }
+        Fx.line(lv, start.add(0, 0.9, 0), t.add(0, 0.9, 0));
+        p.connection.teleport(t.x, t.y, t.z, p.getYRot(), p.getXRot());
+        p.fallDistance = 0;
+        Fx.burst(lv, t.add(0, 1, 0), 18);
+        lv.playSound(null, p.blockPosition(), SoundEvents.PHANTOM_SWOOP, SoundSource.PLAYERS, 1f, 1.8f);
+        if (!oc) {
+            d.energy -= cost;
+            if (d.energy <= 0) { d.energy = 0; d.regenPause = rechargeDelay(d); }
+        }
+        d.cooldowns.put(a.id, oc ? cooldown(a) / 2 : cooldown(a));
+        Net.sync(p);
+    }
+
+    // ---- Punch Through Wall (passivo): mão vazia + segurar bater
+    private static boolean punchBlockOk(BlockState st, int l) {
+        if (!(st.is(BlockTags.MINEABLE_WITH_PICKAXE) || st.is(BlockTags.PLANKS))) return false;
+        float h = st.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+        return h >= 0 && h <= (l >= 2 ? 3.5f : 2.0f);
+    }
+
+    private static boolean punchOk(Player p, BlockState st, AugData d) {
+        int l = d.lvl(Aug.PUNCH);
+        if (l == 0 || d.overheat > 0 || !p.getMainHandItem().isEmpty()) return false;
+        return punchBlockOk(st, l) && (d.overclock > 0 || d.energy >= 8f);
+    }
+
+    @SubscribeEvent
+    public static void punchSpeed(PlayerEvent.BreakSpeed e) {
+        if (punchOk(e.getEntity(), e.getState(), AugData.get(e.getEntity())))
+            e.setNewSpeed(Math.max(e.getNewSpeed(), 1000f));
+    }
+
+    @SubscribeEvent
+    public static void punchHarvest(PlayerEvent.HarvestCheck e) {
+        if (punchOk(e.getEntity(), e.getTargetBlock(), AugData.get(e.getEntity()))) e.setCanHarvest(true);
+    }
+
+    @SubscribeEvent
+    public static void punchArea(BlockEvent.BreakEvent e) {
+        if (!(e.getPlayer() instanceof ServerPlayer p)) return;
+        AugData d = AugData.get(p);
+        if (!punchOk(p, e.getState(), d)) return;
+        ServerLevel lv = p.serverLevel();
+        BlockPos c = e.getPos();
+        int l = d.lvl(Aug.PUNCH);
+        int r = l >= 2 ? 2 : 1;
+        HitResult hr = p.pick(6, 1f, false);
+        Direction.Axis axis = hr instanceof BlockHitResult bh && bh.getType() == HitResult.Type.BLOCK
+                ? bh.getDirection().getAxis() : p.getDirection().getAxis();
+        if (d.overclock == 0) {
+            d.energy -= 8f;
+            if (d.energy <= 0) { d.energy = 0; d.regenPause = rechargeDelay(d); }
+        }
+        int broken = 0;
+        for (int a = -r; a <= r; a++) {
+            for (int b = -r; b <= r; b++) {
+                if (a == 0 && b == 0) continue;
+                BlockPos q = switch (axis) {
+                    case X -> c.offset(0, a, b);
+                    case Y -> c.offset(a, 0, b);
+                    case Z -> c.offset(a, b, 0);
+                };
+                BlockState qs = lv.getBlockState(q);
+                if (!qs.isAir() && punchBlockOk(qs, l) && lv.mayInteract(p, q)) {
+                    lv.destroyBlock(q, true, p);
+                    broken++;
+                }
+            }
+        }
+        if (broken > 0) {
+            Fx.burst(lv, Vec3.atCenterOf(c), 25);
+            lv.playSound(null, c, SoundEvents.ANVIL_LAND, SoundSource.PLAYERS, 0.5f, 0.6f);
+        }
         Net.sync(p);
     }
 
@@ -206,8 +331,6 @@ public class Logic {
         double k = d.potency();
 
         boolean ok = switch (a) {
-            case PUNCH -> punch(p, lv, k);
-            case TAKEDOWN -> takedown(p, lv, d, k);
             case PEPS -> peps(p, lv, d, k);
             case REMOTE_HACK -> hack(p, lv, d);
             case TESLA -> tesla(p, lv, d, k);
@@ -240,50 +363,6 @@ public class Logic {
             }
         }
         return best;
-    }
-
-    private static boolean punch(ServerPlayer p, ServerLevel lv, double k) {
-        HitResult hr = p.pick(4.5, 1f, false);
-        if (hr.getType() != HitResult.Type.BLOCK) { msg(p, "no_target"); return false; }
-        BlockHitResult b = (BlockHitResult) hr;
-        boolean any = false;
-        for (int i = 0; i < 2; i++) {
-            BlockPos q = i == 0 ? b.getBlockPos() : b.getBlockPos().relative(b.getDirection().getOpposite());
-            BlockState st = lv.getBlockState(q);
-            float h = st.getDestroySpeed(lv, q);
-            if (!st.isAir() && h >= 0 && h <= 3f * k && lv.mayInteract(p, q)) {
-                lv.destroyBlock(q, true, p);
-                any = true;
-            }
-        }
-        if (!any) { msg(p, "too_hard"); return false; }
-        Fx.burst(lv, b.getLocation(), 20);
-        lv.playSound(null, p.blockPosition(), SoundEvents.ANVIL_LAND, SoundSource.PLAYERS, 0.7f, 0.6f);
-        return true;
-    }
-
-    private static boolean takedown(ServerPlayer p, ServerLevel lv, AugData d, double k) {
-        Entity t = rayEntity(p, lv, 3.6, e -> e instanceof Enemy && e instanceof LivingEntity);
-        if (!(t instanceof LivingEntity first)) { msg(p, "no_target"); return false; }
-        List<LivingEntity> targets = new ArrayList<>();
-        targets.add(first);
-        if (d.lvl(Aug.QUICKSILVER) >= 2) {
-            lv.getEntitiesOfClass(LivingEntity.class, first.getBoundingBox().inflate(3),
-                            o -> o != first && o != p && o instanceof Enemy)
-                    .stream().min(Comparator.comparingDouble(o -> o.distanceToSqr(first)))
-                    .ifPresent(targets::add);
-        }
-        for (LivingEntity v : targets) {
-            v.hurt(p.damageSources().playerAttack(p), (float) (40 * k));
-            if (d.lvl(Aug.TAKEDOWN) >= 2) {
-                Vec3 dir = v.position().subtract(p.position()).normalize();
-                v.setDeltaMovement(dir.x * 1.6, 0.6, dir.z * 1.6);
-                v.hurtMarked = true;
-            }
-            Fx.burst(lv, v.position().add(0, 1, 0), 15);
-        }
-        lv.playSound(null, p.blockPosition(), SoundEvents.PLAYER_ATTACK_CRIT, SoundSource.PLAYERS, 1f, 0.7f);
-        return true;
     }
 
     private static boolean peps(ServerPlayer p, ServerLevel lv, AugData d, double k) {
@@ -531,13 +610,6 @@ public class Logic {
                 for (ItemEntity it : lv.getEntitiesOfClass(ItemEntity.class, p.getBoundingBox().inflate(40)))
                     it.setGlowingTag(on && it.distanceTo(p) <= 16);
             }
-            if (d.active(Aug.FOCUS)) {
-                int l = d.lvl(Aug.FOCUS);
-                for (Mob m : lv.getEntitiesOfClass(Mob.class, p.getBoundingBox().inflate(l >= 2 ? 20 : 14), o -> o instanceof Enemy))
-                    m.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 25, l >= 2 ? 4 : 2, false, false, false));
-                p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 25, 1, false, false, false));
-                p.addEffect(new MobEffectInstance(MobEffects.DIG_SPEED, 25, 1, false, false, false));
-            }
         }
         if (p.tickCount % 5 == 0) Net.sync(p);
     }
@@ -577,6 +649,35 @@ public class Logic {
         }
         if (e.getSource().getEntity() instanceof ServerPlayer atk && e.getSource().getDirectEntity() == atk) {
             AugData d = AugData.get(atk);
+            // Instant Takedown (passivo): mão vazia + inimigo desprevenido (ou você agachado/camuflado)
+            if (!chaining && d.has(Aug.TAKEDOWN) && d.overheat == 0 && atk.getMainHandItem().isEmpty()
+                    && e.getEntity() instanceof LivingEntity v && v instanceof Enemy) {
+                boolean stealth = atk.isShiftKeyDown() || d.active(Aug.CLOAK);
+                boolean unaware = !(v instanceof Mob m) || m.getTarget() != atk;
+                float tc = d.lvl(Aug.TAKEDOWN) >= 2 ? 10f : 20f;
+                if ((stealth || unaware) && (d.overclock > 0 || d.energy >= tc)) {
+                    if (d.overclock == 0) {
+                        d.energy -= tc;
+                        if (d.energy <= 0) { d.energy = 0; d.regenPause = rechargeDelay(d); }
+                    }
+                    e.setAmount(Math.max(e.getAmount(), 1000f));
+                    ServerLevel lv = atk.serverLevel();
+                    Fx.burst(lv, v.position().add(0, 1, 0), 18);
+                    if (d.lvl(Aug.QUICKSILVER) >= 2) { // Multiple Takedown
+                        lv.getEntitiesOfClass(LivingEntity.class, v.getBoundingBox().inflate(3),
+                                        o -> o != v && o != atk && o instanceof Enemy)
+                                .stream().min(Comparator.comparingDouble(o -> o.distanceToSqr(v)))
+                                .ifPresent(o -> {
+                                    chaining = true;
+                                    o.hurt(atk.damageSources().playerAttack(atk), 1000f);
+                                    chaining = false;
+                                });
+                    }
+                    Net.sync(atk);
+                } else {
+                    e.setAmount(e.getAmount() + 4f * (float) d.potency()); // soco forte
+                }
+            }
             if (d.active(Aug.CLOAK) && !d.has(Aug.CLOAK_TAKEDOWN)) { // atacar desfaz a camuflagem
                 d.active.remove(Aug.CLOAK.id);
                 atk.removeEffect(MobEffects.INVISIBILITY);
