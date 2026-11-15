@@ -19,19 +19,24 @@ public class ClientEvents {
     @SubscribeEvent
     public static void tick(ClientTickEvent.Post e) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
+        if (mc.player == null || mc.level == null) return;
         AugData d = AugData.get(mc.player);
 
         while (ClientSetup.OPEN.consumeClick())
             if (mc.screen == null) mc.setScreen(new AugScreen());
 
         while (ClientSetup.OVERCLOCK.consumeClick())
-            if (mc.screen == null) PacketDistributor.sendToServer(new Net.Request("overclock", (byte) 2));
+            if (mc.screen == null) {
+                AugHud.lastUse = mc.level.getGameTime();
+                PacketDistributor.sendToServer(new Net.Request("overclock", (byte) 2));
+            }
 
         for (Map.Entry<Aug, KeyMapping> en : ClientSetup.KEYS.entrySet()) {
             while (en.getValue().consumeClick())
-                if (mc.screen == null && d.has(en.getKey()))
+                if (mc.screen == null && d.has(en.getKey())) {
+                    AugHud.lastUse = mc.level.getGameTime();
                     PacketDistributor.sendToServer(new Net.Request(en.getKey().id, (byte) 1));
+                }
         }
     }
 }

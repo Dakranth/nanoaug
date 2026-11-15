@@ -21,6 +21,8 @@ import java.util.List;
 /** HUD: cada elemento só aparece se o aprimoramento correspondente estiver instalado. */
 public class AugHud {
     static final int AMBER = 0xFFFFC21A, ORANGE = 0xFFFF7A1A, RED = 0xFFFF4A3A, GRAY = 0xFF7A7A7A, GREEN = 0xFF58FF7A;
+    /** tick (do jogo) do último uso de um aug: a lista de teclas aparece por alguns segundos. */
+    public static long lastUse;
 
     public static void render(GuiGraphics g, DeltaTracker dt) {
         Minecraft mc = Minecraft.getInstance();
@@ -35,9 +37,11 @@ public class AugHud {
         // ---- barra de energia + lista de augs usáveis (esquerda embaixo)
         List<Aug> acts = new ArrayList<>();
         for (Aug a : Aug.values()) if (d.has(a) && a.mode != Aug.Mode.PASSIVE) acts.add(a);
-        if (!acts.isEmpty()) {
+        boolean recent = mc.level != null && mc.level.getGameTime() - lastUse < 100;
+        boolean busy = d.overheat > 0 || d.overclock > 0 || !d.active.isEmpty() || d.energy < d.maxEnergy() - 0.5f;
+        if (!acts.isEmpty() && (recent || busy)) {
             int x = 8;
-            int rowsY = h - 14 - acts.size() * 11;
+            int rowsY = h - 14 - (recent ? acts.size() : 0) * 11;
             int barY = rowsY - 16;
             int barW = 90;
             boolean off = d.overheat > 0, oc = d.overclock > 0;
@@ -53,7 +57,7 @@ public class AugHud {
             for (int i = 1; i < 10; i++) g.fill(x + i * 9, barY, x + i * 9 + 1, barY + 6, 0x66000000);
 
             int y = rowsY;
-            for (Aug a : acts) {
+            for (Aug a : recent ? acts : new ArrayList<Aug>()) {
                 KeyMapping key = ClientSetup.KEYS.get(a);
                 int c = off ? RED : d.active(a) ? GREEN
                         : (!oc && a.mode == Aug.Mode.ACTION && d.energy < Logic.cost(a, d)) ? GRAY : AMBER;
@@ -76,7 +80,7 @@ public class AugHud {
 
         // ---- Wayfinder Radar
         int wl = d.lvl(Aug.WAYFINDER);
-        if (wl > 0 && mc.level != null) {
+        if (wl > 0 && d.active(Aug.SMART_VISION) && mc.level != null) {
             int r = 34, cx = w - r - 8, cy = r + 8;
             double range = wl >= 2 ? 32 : 20;
             g.fill(cx - r, cy - r, cx + r, cy + r, 0x88000000);

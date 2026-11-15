@@ -78,7 +78,6 @@ public class Logic {
 
     static int cooldown(Aug a) {
         return switch (a) {
-            case LIDAR -> 4;
             case PUNCH -> 20;
             case TAKEDOWN -> 30;
             case PEPS, REMOTE_HACK -> 40;
@@ -207,7 +206,6 @@ public class Logic {
         double k = d.potency();
 
         boolean ok = switch (a) {
-            case LIDAR -> mark(p, lv, d);
             case PUNCH -> punch(p, lv, k);
             case TAKEDOWN -> takedown(p, lv, d, k);
             case PEPS -> peps(p, lv, d, k);
@@ -242,19 +240,6 @@ public class Logic {
             }
         }
         return best;
-    }
-
-    private static boolean mark(ServerPlayer p, ServerLevel lv, AugData d) {
-        Entity t = rayEntity(p, lv, 32, e -> e instanceof LivingEntity && !(e instanceof Player));
-        if (t == null) { msg(p, "no_target"); return false; }
-        if (!d.marks.remove(t.getUUID())) {
-            int max = new int[]{10, 25, 40}[d.lvl(Aug.LIDAR) - 1];
-            if (d.marks.size() >= max) { msg(p, "marks_full"); return false; }
-            d.marks.add(t.getUUID());
-        }
-        lv.playSound(null, p.blockPosition(), SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.PLAYERS, 0.6f, 1.8f);
-        Fx.burst(lv, t.position().add(0, t.getBbHeight() + 0.3, 0), 8);
-        return true;
     }
 
     private static boolean punch(ServerPlayer p, ServerLevel lv, double k) {
@@ -545,15 +530,6 @@ public class Logic {
                 boolean on = d.active(Aug.SMART_VISION);
                 for (ItemEntity it : lv.getEntitiesOfClass(ItemEntity.class, p.getBoundingBox().inflate(40)))
                     it.setGlowingTag(on && it.distanceTo(p) <= 16);
-            }
-            if (!d.marks.isEmpty()) {
-                Iterator<UUID> it = d.marks.iterator();
-                while (it.hasNext()) {
-                    Entity m = lv.getEntity(it.next());
-                    if (m instanceof LivingEntity le && le.isAlive())
-                        le.addEffect(new MobEffectInstance(MobEffects.GLOWING, 30, 0, false, false, false));
-                    else it.remove();
-                }
             }
             if (d.active(Aug.FOCUS)) {
                 int l = d.lvl(Aug.FOCUS);

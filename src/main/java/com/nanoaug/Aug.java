@@ -13,8 +13,7 @@ public enum Aug {
     // ---- OLHOS
     SMART_VISION("smart_vision", Slot.EYES, Mode.TOGGLE, null, 0, null, 2, 0, 1, 1),
     MAGPIE("magpie", Slot.EYES, Mode.PASSIVE, "smart_vision", 2, null, 1),
-    LIDAR("lidar", Slot.EYES, Mode.ACTION, null, 0, null, 1, 1, 1),
-    WAYFINDER("wayfinder", Slot.EYES, Mode.PASSIVE, null, 0, null, 1, 1, 1),
+    WAYFINDER("wayfinder", Slot.EYES, Mode.PASSIVE, "smart_vision", 1, null, 1, 1, 1),
     // ---- TORSO
     SENTINEL("sentinel", Slot.TORSO, Mode.PASSIVE, null, 0, null, 2, 1, 1),
     ANGIOGENESIS("angiogenesis", Slot.TORSO, Mode.PASSIVE, "sentinel", 1, null, 1, 1),

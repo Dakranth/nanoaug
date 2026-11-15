@@ -33,7 +33,6 @@ public class ClientSetup {
         KEYS.put(Aug.CLOAK, new KeyMapping("key.nanoaug.cloak", InputConstants.KEY_C, CAT));
         KEYS.put(Aug.TITAN, new KeyMapping("key.nanoaug.titan", InputConstants.KEY_H, CAT));
         KEYS.put(Aug.FOCUS, new KeyMapping("key.nanoaug.focus", InputConstants.KEY_J, CAT));
-        KEYS.put(Aug.LIDAR, new KeyMapping("key.nanoaug.lidar", InputConstants.KEY_M, CAT));
         KEYS.put(Aug.PUNCH, new KeyMapping("key.nanoaug.punch", InputConstants.KEY_K, CAT));
         KEYS.put(Aug.TAKEDOWN, new KeyMapping("key.nanoaug.takedown", InputConstants.KEY_Z, CAT));
         KEYS.put(Aug.PEPS, new KeyMapping("key.nanoaug.peps", InputConstants.KEY_Y, CAT));

@@ -28,7 +28,6 @@ public class AugData {
 
     // só no servidor, não é salvo
     public final Map<String, Integer> cooldowns = new HashMap<>();
-    public final Set<UUID> marks = new HashSet<>();
     public int lastHurt;
     public int regenPause;
 
