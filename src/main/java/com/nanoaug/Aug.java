@@ -28,7 +28,7 @@ public enum Aug {
     TAKEDOWN("takedown", Slot.ARMS, Mode.PASSIVE, "arm", 1, null, 0, 1),
     RELOAD("reload", Slot.ARMS, Mode.PASSIVE, "arm", 1, null, 1, 1),
     PEPS("peps", Slot.ARMS, Mode.ACTION, null, 0, null, 2, 1),
-    REMOTE_HACK("remote_hack", Slot.ARMS, Mode.ACTION, null, 0, null, 2, 0, 1),
+    REMOTE_HACK("remote_hack", Slot.ARMS, Mode.PASSIVE, null, 0, null, 2, 0, 1),
     TESLA("tesla", Slot.ARMS, Mode.ACTION, null, 0, null, 2, 1, 1),
     TESLA_RANGE("tesla_range", Slot.ARMS, Mode.PASSIVE, "tesla", 1, null, 1),
     NANOBLADE("nanoblade", Slot.ARMS, Mode.ACTION, null, 0, null, 2, 0, 1),

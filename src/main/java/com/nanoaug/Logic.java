@@ -18,6 +18,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
@@ -74,7 +75,6 @@ public class Logic {
         return switch (a) {
             case NANOBLADE -> 25f;
             case PEPS -> 30f;
-            case REMOTE_HACK -> 15f;
             case TESLA -> 35f;
             case TYPHOON -> 60f;
             case ICARUS_DASH -> d.lvl(a) == 1 ? 20f : d.lvl(a) == 2 ? 12f : 18f;
@@ -84,7 +84,7 @@ public class Logic {
 
     static int cooldown(Aug a) {
         return switch (a) {
-            case PEPS, REMOTE_HACK -> 40;
+            case PEPS -> 40;
             case TESLA -> 100;
             case NANOBLADE -> 20;
             case TYPHOON -> 300;
@@ -142,6 +142,7 @@ public class Logic {
             case 2 -> overclock(p);
             case 3 -> equip(p, r.id());
             case 5 -> dashAimed(p);
+            case 6 -> hackRemote(p);
             default -> {}
         }
     }
@@ -213,7 +214,7 @@ public class Logic {
         Vec3 start = p.position();
         if (d.lvl(a) >= 3) { // Charged Dash: derruba inimigos no caminho
             for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class,
-                    new AABB(start, t).inflate(1.6), o -> o != p && o instanceof Enemy)) {
+                    new AABB(start, t).inflate(1.6), o -> targetable(p, o))) {
                 e.hurt(p.damageSources().playerAttack(p), (float) (6 * k));
                 Vec3 dir = t.subtract(start).normalize();
                 e.setDeltaMovement(dir.x * 1.2, 0.4, dir.z * 1.2);
@@ -301,6 +302,7 @@ public class Logic {
     static void deactivateAll(ServerPlayer p, AugData d) {
         d.active.clear();
         p.removeEffect(MobEffects.INVISIBILITY);
+        p.removeEffect(MobEffects.NIGHT_VISION);
     }
 
     static void use(ServerPlayer p, Aug a) {
@@ -312,6 +314,7 @@ public class Logic {
         if (a.mode == Aug.Mode.TOGGLE) {
             if (d.active.remove(a.id)) {
                 if (a == Aug.CLOAK) p.removeEffect(MobEffects.INVISIBILITY);
+                if (a == Aug.SMART_VISION) p.removeEffect(MobEffects.NIGHT_VISION);
                 lv.playSound(null, p.blockPosition(), SoundEvents.BEACON_DEACTIVATE, SoundSource.PLAYERS, 0.6f, 1.4f);
             } else {
                 if (d.energy < 5f && d.overclock == 0) { msg(p, "low_energy"); return; }
@@ -332,7 +335,6 @@ public class Logic {
 
         boolean ok = switch (a) {
             case PEPS -> peps(p, lv, d, k);
-            case REMOTE_HACK -> hack(p, lv, d);
             case TESLA -> tesla(p, lv, d, k);
             case NANOBLADE -> blade(p, lv, d, k);
             case TYPHOON -> typhoon(p, lv, d, k);
@@ -350,6 +352,13 @@ public class Logic {
     }
 
     // ================================================================ ações
+    /** Alvo válido para as habilidades de combate: qualquer mob ou jogador, menos você e seus pets. */
+    private static boolean targetable(ServerPlayer p, Entity e) {
+        if (e == p || !(e instanceof LivingEntity le) || !le.isAlive()) return false;
+        if (e instanceof TamableAnimal t && t.isOwnedBy(p)) return false;
+        return e instanceof Mob || e instanceof Player;
+    }
+
     private static Entity rayEntity(ServerPlayer p, ServerLevel lv, double range, Predicate<Entity> filter) {
         Vec3 eye = p.getEyePosition();
         Vec3 end = eye.add(p.getLookAngle().scale(range));
@@ -368,7 +377,7 @@ public class Logic {
     private static boolean peps(ServerPlayer p, ServerLevel lv, AugData d, double k) {
         Vec3 look = p.getLookAngle();
         if (p.isShiftKeyDown() && d.lvl(Aug.PEPS) >= 2) { // Precision Diode
-            Entity t = rayEntity(p, lv, 14, e -> e instanceof LivingEntity && e instanceof Enemy);
+            Entity t = rayEntity(p, lv, 14, e -> targetable(p, e));
             if (!(t instanceof LivingEntity le)) { msg(p, "no_target"); return false; }
             le.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 200, 9));
             le.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 200, 9));
@@ -380,7 +389,7 @@ public class Logic {
         }
         Vec3 flat = new Vec3(look.x, 0, look.z).normalize();
         for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(7),
-                o -> o != p && o instanceof Enemy)) {
+                o -> targetable(p, o))) {
             Vec3 to = e.position().subtract(p.position());
             if (to.lengthSqr() < 1e-4 || to.normalize().dot(flat) < 0.5) continue;
             Vec3 dir = to.normalize();
@@ -395,59 +404,56 @@ public class Logic {
         return true;
     }
 
-    /** Hacking remoto: portas/alavancas/botões; nível 2 aumenta alcance; nível 3 desativa inimigo mirado. */
-    private static boolean hack(ServerPlayer p, ServerLevel lv, AugData d) {
+    /** Remote Hacking (passivo): botão direito de mão vazia em alavancas, portas etc., à distância. */
+    static void hackRemote(ServerPlayer p) {
+        AugData d = AugData.get(p);
         int l = d.lvl(Aug.REMOTE_HACK);
-        double range = l >= 2 ? 20 : 10;
-        Vec3 eye = p.getEyePosition();
-        HitResult hr = p.pick(range, 1f, false);
-        double bd = hr.getType() == HitResult.Type.BLOCK ? hr.getLocation().distanceTo(eye) : 1e9;
-
-        if (l >= 3) {
-            Entity t = rayEntity(p, lv, range, e -> e instanceof Mob && e instanceof Enemy);
-            if (t instanceof Mob m && p.distanceTo(m) < bd) {
-                m.setTarget(null);
-                m.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 120, 5));
-                m.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 120, 3));
-                Fx.arc(lv, eye.add(0, -0.3, 0), m.position().add(0, m.getBbHeight() / 2, 0));
-                lv.playSound(null, m.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 0.7f, 2f);
-                return true;
-            }
+        if (l == 0 || !p.getMainHandItem().isEmpty()) return;
+        if (d.overheat > 0) { msg(p, "offline"); return; }
+        if (d.cooldowns.getOrDefault("remote_hack", 0) > 0) return;
+        boolean oc = d.overclock > 0;
+        if (!oc && d.energy < 5f) { msg(p, "low_energy"); return; }
+        ServerLevel lv = p.serverLevel();
+        HitResult hr = p.pick(l >= 2 ? 20 : 10, 1f, false);
+        if (hr.getType() != HitResult.Type.BLOCK) return;
+        BlockHitResult bhr = (BlockHitResult) hr;
+        BlockPos pos = bhr.getBlockPos();
+        BlockState st = lv.getBlockState(pos);
+        Block b = st.getBlock();
+        boolean ok = false;
+        if (b instanceof DoorBlock door) {
+            door.setOpen(p, lv, st, pos, !st.getValue(DoorBlock.OPEN));
+            ok = true;
+        } else if (b instanceof TrapDoorBlock) {
+            lv.setBlock(pos, st.cycle(TrapDoorBlock.OPEN), 2);
+            lv.playSound(null, pos, SoundEvents.IRON_TRAPDOOR_OPEN, SoundSource.BLOCKS, 1f, 1f);
+            ok = true;
+        } else if (b instanceof LeverBlock || b instanceof ButtonBlock || b instanceof FenceGateBlock) {
+            st.useWithoutItem(lv, p, bhr);
+            ok = true;
+        } else if (l >= 2 && b instanceof RedstoneLampBlock) {
+            lv.setBlock(pos, st.cycle(RedstoneLampBlock.LIT), 3);
+            ok = true;
+        } else if (l >= 3 && b instanceof DispenserBlock) { // dispenser e dropper
+            lv.scheduleTick(pos, b, 4);
+            ok = true;
         }
-        if (hr.getType() == HitResult.Type.BLOCK) {
-            BlockHitResult bhr = (BlockHitResult) hr;
-            BlockPos pos = bhr.getBlockPos();
-            BlockState st = lv.getBlockState(pos);
-            Block b = st.getBlock();
-            boolean ok = false;
-            if (b instanceof DoorBlock door) {
-                door.setOpen(p, lv, st, pos, !st.getValue(DoorBlock.OPEN));
-                ok = true;
-            } else if (b instanceof TrapDoorBlock) {
-                lv.setBlock(pos, st.cycle(TrapDoorBlock.OPEN), 2);
-                lv.playSound(null, pos, SoundEvents.IRON_TRAPDOOR_OPEN, SoundSource.BLOCKS, 1f, 1f);
-                ok = true;
-            } else if (b instanceof LeverBlock || b instanceof ButtonBlock || b instanceof FenceGateBlock) {
-                st.useWithoutItem(lv, p, bhr);
-                ok = true;
-            } else if (l >= 2 && b instanceof RedstoneLampBlock) {
-                lv.setBlock(pos, st.cycle(RedstoneLampBlock.LIT), 3);
-                ok = true;
-            }
-            if (ok) {
-                Fx.arc(lv, eye.add(0, -0.3, 0), Vec3.atCenterOf(pos));
-                return true;
-            }
+        if (!ok) return;
+        if (!oc) {
+            d.energy -= 5f;
+            if (d.energy <= 0) { d.energy = 0; d.regenPause = rechargeDelay(d); }
         }
-        msg(p, "no_target");
-        return false;
+        d.cooldowns.put("remote_hack", 8);
+        Fx.arc(lv, p.getEyePosition().add(0, -0.3, 0), Vec3.atCenterOf(pos));
+        lv.playSound(null, pos, SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 0.5f, 2f);
+        Net.sync(p);
     }
 
     private static boolean tesla(ServerPlayer p, ServerLevel lv, AugData d, double k) {
         int n = new int[]{1, 2, 4}[d.lvl(Aug.TESLA) - 1];
         double range = 8 * (1 + d.lvl(Aug.TESLA_RANGE));
         List<LivingEntity> list = lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(range),
-                o -> o != p && o.isAlive() && o instanceof Enemy && o.distanceTo(p) <= range && p.hasLineOfSight(o));
+                o -> targetable(p, o) && o.distanceTo(p) <= range && p.hasLineOfSight(o));
         list.sort(Comparator.comparingDouble(o -> o.distanceToSqr(p)));
         if (list.isEmpty()) { msg(p, "no_target"); return false; }
         Vec3 from = p.getEyePosition().add(0, -0.4, 0);
@@ -490,7 +496,7 @@ public class Logic {
             }
         } else if (d.has(Aug.TYPHOON_STUN)) {
             for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(8),
-                    o -> o != p && o instanceof Enemy)) {
+                    o -> targetable(p, o))) {
                 e.hurt(p.damageSources().playerAttack(p), 1f);
                 e.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, (int) (100 * k), 6));
                 e.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, (int) (100 * k), 3));
@@ -514,7 +520,7 @@ public class Logic {
         Vec3 start = p.position();
         if (l >= 3) { // Charged Dash: derruba inimigos no caminho
             for (LivingEntity e : lv.getEntitiesOfClass(LivingEntity.class,
-                    p.getBoundingBox().expandTowards(h.scale(5)).inflate(1), o -> o != p && o instanceof Enemy)) {
+                    p.getBoundingBox().expandTowards(h.scale(5)).inflate(1), o -> targetable(p, o))) {
                 e.hurt(p.damageSources().playerAttack(p), (float) (6 * k));
                 e.setDeltaMovement(h.x * 1.2, 0.4, h.z * 1.2);
                 e.hurtMarked = true;
@@ -599,6 +605,7 @@ public class Logic {
             if (d.lvl(Aug.REBREATHER) >= 2) p.removeEffect(MobEffects.POISON);
 
             if (d.active(Aug.SMART_VISION)) {
+                p.addEffect(new MobEffectInstance(MobEffects.NIGHT_VISION, 400, 0, false, false, false));
                 int l = d.lvl(Aug.SMART_VISION);
                 double r = l >= 2 ? 24 : 16;
                 for (Mob m : lv.getEntitiesOfClass(Mob.class, p.getBoundingBox().inflate(r), o -> o instanceof Enemy))
@@ -626,7 +633,7 @@ public class Logic {
         if (l >= 2 && dist >= 5) { // Icarus Strike
             ServerLevel lv = p.serverLevel();
             for (LivingEntity t : lv.getEntitiesOfClass(LivingEntity.class, p.getBoundingBox().inflate(4),
-                    o -> o != p && o instanceof Enemy)) {
+                    o -> targetable(p, o))) {
                 t.hurt(p.damageSources().playerAttack(p), (float) (dist * 0.8 * d.potency()));
                 t.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 60, 5));
             }
@@ -651,9 +658,10 @@ public class Logic {
             AugData d = AugData.get(atk);
             // Instant Takedown (passivo): mão vazia + inimigo desprevenido (ou você agachado/camuflado)
             if (!chaining && d.has(Aug.TAKEDOWN) && d.overheat == 0 && atk.getMainHandItem().isEmpty()
-                    && e.getEntity() instanceof LivingEntity v && v instanceof Enemy) {
+                    && e.getEntity() instanceof LivingEntity v && targetable(atk, v)) {
                 boolean stealth = atk.isShiftKeyDown() || d.active(Aug.CLOAK);
-                boolean unaware = !(v instanceof Mob m) || m.getTarget() != atk;
+                boolean unaware = v instanceof Mob m ? m.getTarget() != atk
+                        : v.getLookAngle().dot(atk.position().subtract(v.position()).normalize()) < 0.2;
                 float tc = d.lvl(Aug.TAKEDOWN) >= 2 ? 10f : 20f;
                 if ((stealth || unaware) && (d.overclock > 0 || d.energy >= tc)) {
                     if (d.overclock == 0) {
@@ -665,7 +673,7 @@ public class Logic {
                     Fx.burst(lv, v.position().add(0, 1, 0), 18);
                     if (d.lvl(Aug.QUICKSILVER) >= 2) { // Multiple Takedown
                         lv.getEntitiesOfClass(LivingEntity.class, v.getBoundingBox().inflate(3),
-                                        o -> o != v && o != atk && o instanceof Enemy)
+                                        o -> o != v && targetable(atk, o))
                                 .stream().min(Comparator.comparingDouble(o -> o.distanceToSqr(v)))
                                 .ifPresent(o -> {
                                     chaining = true;

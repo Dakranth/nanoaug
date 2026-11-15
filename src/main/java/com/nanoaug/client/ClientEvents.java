@@ -8,6 +8,8 @@ import com.nanoaug.DashAim;
 import com.nanoaug.NanoAug;
 import com.nanoaug.Net;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.world.InteractionHand;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -76,6 +78,15 @@ public class ClientEvents {
         if (aimSlot >= 0 && now - aimStart >= 6)
             aimTarget = DashAim.compute(mc.player, DashAim.range(d.lvl(Aug.ICARUS_DASH)) * d.potency());
         else aimTarget = null;
+    }
+
+    /** Remote Hacking (passivo): botão direito de mão vazia mirando alavanca, porta etc. longe. */
+    @SubscribeEvent
+    public static void rightClickEmpty(PlayerInteractEvent.RightClickEmpty e) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || e.getHand() != InteractionHand.MAIN_HAND) return;
+        if (AugData.get(mc.player).has(Aug.REMOTE_HACK))
+            PacketDistributor.sendToServer(new Net.Request("remote_hack", (byte) 6));
     }
 
     /** Marcador amarelo do destino do dash. */

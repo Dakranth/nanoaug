@@ -44,8 +44,8 @@ public class AugLayer extends RenderLayer<AbstractClientPlayer, PlayerModel<Abst
     private static final P[] PARTS = {
             new P(0, "head"), new P(0, "ears"),
             new P(1, "body"),
-            new P(2, "rarm"), new P(2, "rp1"), new P(2, "rp2"), new P(2, "rp3"), new P(2, "blade"),
-            new P(3, "larm"), new P(3, "lp1"), new P(3, "lp2"), new P(3, "lp3"),
+            new P(2, "rarm"), new P(2, "blade"),
+            new P(3, "larm"),
             new P(4, "rleg"), new P(5, "lleg")
     };
     private static final Set<String> GLOW = Set.of("head", "body", "rarm", "larm", "rleg", "lleg");
@@ -73,14 +73,6 @@ public class AugLayer extends RenderLayer<AbstractClientPlayer, PlayerModel<Abst
         r.addOrReplaceChild("rleg", CubeListBuilder.create().texOffs(0, 16).addBox(-2F, 0F, -2F, 4F, 12F, 4F, g), PartPose.ZERO);
         r.addOrReplaceChild("lleg", CubeListBuilder.create().texOffs(16, 48).addBox(-2F, 0F, -2F, 4F, 12F, 4F, g), PartPose.ZERO);
 
-        // três pétalas pequenas em cada ombro
-        float[] rot = {0.12F, 0.32F, 0.52F};
-        for (int i = 0; i < 3; i++) {
-            r.addOrReplaceChild("rp" + (i + 1), CubeListBuilder.create().texOffs(32, 0).addBox(-3.6F, -0.8F, -2.4F, 4.6F, 0.8F, 4.8F),
-                    PartPose.offsetAndRotation(-1F, -2.1F - 0.35F * i, 0F, 0F, 0F, rot[i]));
-            r.addOrReplaceChild("lp" + (i + 1), CubeListBuilder.create().texOffs(32, 0).addBox(-1.0F, -0.8F, -2.4F, 4.6F, 0.8F, 4.8F),
-                    PartPose.offsetAndRotation(1F, -2.1F - 0.35F * i, 0F, 0F, 0F, -rot[i]));
-        }
         r.addOrReplaceChild("blade", CubeListBuilder.create().texOffs(0, 32).addBox(-1.4F, 8F, -12F, 0.5F, 2F, 10F), PartPose.ZERO);
         return LayerDefinition.create(mesh, 64, 64);
     }
@@ -90,7 +82,7 @@ public class AugLayer extends RenderLayer<AbstractClientPlayer, PlayerModel<Abst
             case "head" -> d.any(Aug.Slot.EYES);
             case "ears" -> d.has(Aug.SOCIAL);
             case "body" -> d.any(Aug.Slot.TORSO) || d.any(Aug.Slot.BACK);
-            case "rarm", "larm", "rp1", "rp2", "rp3", "lp1", "lp2", "lp3" -> d.has(Aug.ARM);
+            case "rarm", "larm" -> d.has(Aug.ARM);
             case "blade" -> d.has(Aug.NANOBLADE) && p.getMainHandItem().isEmpty();
             case "rleg", "lleg" -> d.has(Aug.LEG);
             default -> false;
@@ -100,7 +92,7 @@ public class AugLayer extends RenderLayer<AbstractClientPlayer, PlayerModel<Abst
     private static boolean glowVisible(String n, AugData d) {
         boolean energized = d.active(Aug.CLOAK) || d.active(Aug.TITAN) || d.overclock > 0;
         return switch (n) {
-            case "head" -> d.any(Aug.Slot.EYES);
+            case "head" -> d.active(Aug.SMART_VISION);
             case "body" -> energized && (d.any(Aug.Slot.TORSO) || d.any(Aug.Slot.BACK));
             case "rarm", "larm" -> d.has(Aug.ARM);
             case "rleg", "lleg" -> energized && d.has(Aug.LEG);
