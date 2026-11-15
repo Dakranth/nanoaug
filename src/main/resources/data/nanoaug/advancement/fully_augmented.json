@@ -1,0 +1,1 @@
+{"display": {"icon": {"id": "minecraft:netherite_ingot"}, "title": {"translate": "advancement.nanoaug.fully_augmented.title"}, "description": {"translate": "advancement.nanoaug.fully_augmented.desc"}, "frame": "challenge", "show_toast": true, "announce_to_chat": true, "hidden": false}, "criteria": {"done": {"trigger": "minecraft:impossible"}}, "parent": "nanoaug:augmented"}

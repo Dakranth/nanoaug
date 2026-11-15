@@ -1,6 +1,7 @@
 package com.nanoaug;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -64,6 +65,7 @@ public enum Aug {
     }
 
     public int max() { return costs.length; }
+    public ResourceLocation icon() { return ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, "textures/gui/aug/" + id + ".png"); }
     public String nameKey() { return "aug." + NanoAug.MODID + "." + id; }
     public String levelKey(int n) { return nameKey() + "." + n; }
     public String descKey(int n) { return levelKey(n) + ".desc"; }

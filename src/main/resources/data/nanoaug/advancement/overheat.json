@@ -1,0 +1,1 @@
+{"display": {"icon": {"id": "nanoaug:neuropozyne"}, "title": {"translate": "advancement.nanoaug.overheat.title"}, "description": {"translate": "advancement.nanoaug.overheat.desc"}, "frame": "task", "show_toast": true, "announce_to_chat": true, "hidden": false}, "criteria": {"done": {"trigger": "minecraft:impossible"}}, "parent": "nanoaug:augmented"}

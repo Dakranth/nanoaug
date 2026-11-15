@@ -17,7 +17,8 @@ public class AugData {
             Codec.FLOAT.optionalFieldOf("energy", 100f).forGetter(d -> d.energy),
             Codec.INT.optionalFieldOf("overclock", 0).forGetter(d -> d.overclock),
             Codec.INT.optionalFieldOf("overheat", 0).forGetter(d -> d.overheat),
-            Codec.STRING.listOf().optionalFieldOf("slots", List.of()).forGetter(d -> Arrays.asList(d.slots))
+            Codec.STRING.listOf().optionalFieldOf("slots", List.of()).forGetter(d -> Arrays.asList(d.slots)),
+            Codec.INT.optionalFieldOf("stable", 0).forGetter(d -> d.stable)
     ).apply(i, AugData::new));
 
     public int praxis;
@@ -26,6 +27,11 @@ public class AugData {
     public float energy = 100f;
     public int overclock;
     public int overheat;
+    /** ticks restantes de estabilidade (Neuropozyne). */
+    public int stable;
+    /** ticks de falha de sistema (efeito de tela). */
+    public int glitch;
+    public int lastWarn;
     /** 4 slots de uso (ids de aug; vazio = livre). */
     public final String[] slots = {"", "", "", ""};
 
@@ -36,13 +42,14 @@ public class AugData {
 
     public AugData() {}
 
-    public AugData(int praxis, Map<String, Integer> lv, List<String> act, float energy, int oc, int oh, List<String> sl) {
+    public AugData(int praxis, Map<String, Integer> lv, List<String> act, float energy, int oc, int oh, List<String> sl, int st) {
         this.praxis = praxis;
         this.levels.putAll(lv);
         this.active.addAll(act);
         this.energy = energy;
         this.overclock = oc;
         this.overheat = oh;
+        this.stable = st;
         for (int i = 0; i < 4 && i < sl.size(); i++) this.slots[i] = sl.get(i);
     }
 

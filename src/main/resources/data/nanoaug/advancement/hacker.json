@@ -1,0 +1,1 @@
+{"display": {"icon": {"id": "minecraft:lever"}, "title": {"translate": "advancement.nanoaug.hacker.title"}, "description": {"translate": "advancement.nanoaug.hacker.desc"}, "frame": "task", "show_toast": true, "announce_to_chat": true, "hidden": false}, "criteria": {"done": {"trigger": "minecraft:impossible"}}, "parent": "nanoaug:augmented"}

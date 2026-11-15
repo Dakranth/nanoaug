@@ -202,8 +202,10 @@ public class AugScreen extends Screen {
             g.fill(sx, sy, sx + 48, sy + 22, hov ? 0xCC3A2E08 : 0xAA0A0A0A);
             g.renderOutline(sx, sy, 48, 22, pulse ? AMBER : sa != null ? GOLD : 0xFF555555);
             g.drawString(font, "[" + ClientSetup.SLOTS[i].getTranslatedKeyMessage().getString() + "]", sx + 3, sy + 2, AMBER, false);
-            if (sa != null)
-                g.drawString(font, font.plainSubstrByWidth(shortName(sa), 44), sx + 3, sy + 12, GOLD, false);
+            if (sa != null) {
+                g.drawString(font, font.plainSubstrByWidth(shortName(sa), 44), sx + 3, sy + 13, GOLD, false);
+                g.blit(sa.icon(), sx + 35, sy + 2, 11, 11, 0f, 0f, 16, 16, 16, 16);
+            }
         }
         int hy = cy + 108;
         for (FormattedCharSequence line : font.split(Component.translatable("gui.nanoaug.slots_hint"), 205)) {

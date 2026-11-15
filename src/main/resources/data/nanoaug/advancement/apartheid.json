@@ -1,0 +1,1 @@
+{"display": {"icon": {"id": "minecraft:iron_block"}, "title": {"translate": "advancement.nanoaug.apartheid.title"}, "description": {"translate": "advancement.nanoaug.apartheid.desc"}, "frame": "goal", "show_toast": true, "announce_to_chat": true, "hidden": false}, "criteria": {"done": {"trigger": "minecraft:impossible"}}, "parent": "nanoaug:augmented"}

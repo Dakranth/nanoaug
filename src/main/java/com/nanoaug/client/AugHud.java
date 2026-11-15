@@ -1,6 +1,8 @@
 package com.nanoaug.client;
 
 import com.nanoaug.Aug;
+import com.nanoaug.Ammo;
+import com.nanoaug.Apartheid;
 import com.nanoaug.AugData;
 import com.nanoaug.Logic;
 import net.minecraft.client.DeltaTracker;
@@ -60,10 +62,12 @@ public class AugHud {
             for (Aug a : recent ? acts : new ArrayList<Aug>()) {
                 KeyMapping key = ClientSetup.SLOTS[d.slotOf(a)];
                 int c = off ? RED : d.active(a) ? GREEN
-                        : (!oc && a.mode == Aug.Mode.ACTION && d.energy < Logic.cost(a, d)) ? GRAY : AMBER;
+                        : (!oc && ((a.mode == Aug.Mode.ACTION && d.energy < Logic.cost(a, d)) || Ammo.count(p, a) == 0)) ? GRAY : AMBER;
                 Component line = Component.literal("[").append(key.getTranslatedKeyMessage()).append("] ")
-                        .append(Component.translatable(a.nameKey())).append(d.active(a) ? " ON" : "");
-                g.drawString(f, line, x, y, c, true);
+                        .append(Component.translatable(a.nameKey())).append(d.active(a) ? " ON" : "")
+                        .append(Ammo.count(p, a) >= 0 ? "  x" + Ammo.count(p, a) : "");
+                g.blit(a.icon(), x, y - 1, 10, 10, 0f, 0f, 16, 16, 16, 16);
+                g.drawString(f, line, x + 13, y, c, true);
                 y += 11;
             }
         }
@@ -119,12 +123,47 @@ public class AugHud {
             }
         }
 
-        // ---- CASIE
-        if (d.has(Aug.SOCIAL) && mc.crosshairPickEntity instanceof Villager)
-            g.drawCenteredString(f, Component.translatable("hud.nanoaug.casie"), w / 2, h / 2 + 26, AMBER);
+        // ---- CASIE: lê o aldeão
+        if (d.has(Aug.SOCIAL) && mc.crosshairPickEntity instanceof Villager vill) {
+            var vd = vill.getVillagerData();
+            Component prof = Component.translatable("entity.minecraft.villager." + vd.getProfession().name());
+            g.drawCenteredString(f, Component.empty().append(prof).append("  Nv. " + vd.getLevel()), w / 2, h / 2 + 26, AMBER);
+            boolean wary = Apartheid.wary(d);
+            g.drawCenteredString(f, Component.translatable(wary ? "hud.nanoaug.mood_wary" : "hud.nanoaug.mood_calm"),
+                    w / 2, h / 2 + 36, wary ? RED : GREEN);
+            if (d.lvl(Aug.SOCIAL) >= 2) {
+                double pm = Apartheid.priceMod(d);
+                g.drawCenteredString(f, Component.translatable("hud.nanoaug.price",
+                        (pm >= 0 ? "-" : "+") + Math.round(Math.abs(pm) * 100) + "%"), w / 2, h / 2 + 46, AMBER);
+            }
+        }
 
         // ---- Icarus
         if (d.has(Aug.ICARUS_LANDING) && p.fallDistance > 3 && !p.getAbilities().flying)
-            g.drawCenteredString(f, Component.translatable("hud.nanoaug.landing_ok"), w / 2, h / 2 + 38, AMBER);
+            g.drawCenteredString(f, Component.translatable("hud.nanoaug.landing_ok"), w / 2, h / 2 + 60, AMBER);
+
+        // ---- estabilidade das augs (Neuropozyne)
+        if (d.stable > 0) {
+            int sec = d.stable / 20;
+            g.drawString(f, Component.translatable("hud.nanoaug.stable", String.format("%d:%02d", sec / 60, sec % 60)), 8, 8, GREEN, true);
+        } else if (Logic.experimentalCount(d) >= 3) {
+            g.drawString(f, Component.translatable("hud.nanoaug.unstable"), 8, 8, RED, true);
+        }
+
+        // ---- efeitos de tela: estática (sobreaquecimento/falha) e clarão amarelo (uso/overclock)
+        if (mc.level != null) {
+            long gt = mc.level.getGameTime();
+            java.util.Random rnd = new java.util.Random(gt);
+            int noise = d.overheat > 0 ? 40 : d.glitch > 0 ? 80 : 0;
+            for (int i = 0; i < noise; i++) {
+                int nx = rnd.nextInt(w), ny = rnd.nextInt(h), nw = 8 + rnd.nextInt(60);
+                g.fill(nx, ny, Math.min(w, nx + nw), ny + 1, d.overheat > 0 ? 0x44FF4A3A : 0x55FFC21A);
+            }
+            if (gt - lastUse < 5 || d.overclock > 0) {
+                int al = d.overclock > 0 ? 0x33 : 0x55;
+                g.fillGradient(0, 0, w, 16, (al << 24) | 0xFFAA00, 0x00FFAA00);
+                g.fillGradient(0, h - 16, w, h, 0x00FFAA00, (al << 24) | 0xFFAA00);
+            }
+        }
     }
 }

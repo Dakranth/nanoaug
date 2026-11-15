@@ -1,0 +1,1 @@
+{"type": "minecraft:crafting_shapeless", "category": "misc", "ingredients": [{"item": "minecraft:iron_ingot"}, {"item": "minecraft:quartz"}, {"item": "minecraft:iron_nugget"}], "result": {"id": "nanoaug:blade_ammo", "count": 4}}

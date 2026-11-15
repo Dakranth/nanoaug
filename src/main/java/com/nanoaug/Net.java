@@ -1,6 +1,7 @@
 package com.nanoaug;
 
 import io.netty.buffer.ByteBuf;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -13,6 +14,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.UUID;
 
 public class Net {
     private static final StreamCodec<ByteBuf, List<String>> STRS = ByteBufCodecs.STRING_UTF8.apply(ByteBufCodecs.list());
@@ -22,7 +24,7 @@ public class Net {
 
     /** servidor -> cliente */
     public record Sync(int praxis, HashMap<String, Integer> levels, List<String> active, float energy,
-                       int overclock, int overheat, List<String> slots) implements CustomPacketPayload {
+                       int overclock, int overheat, List<String> slots, int stable, int glitch) implements CustomPacketPayload {
         public static final Type<Sync> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, "sync"));
         public static final StreamCodec<ByteBuf, Sync> CODEC = StreamCodec.of(Sync::write, Sync::read);
 
@@ -34,6 +36,8 @@ public class Net {
             ByteBufCodecs.VAR_INT.encode(b, s.overclock());
             ByteBufCodecs.VAR_INT.encode(b, s.overheat());
             STRS.encode(b, s.slots());
+            ByteBufCodecs.VAR_INT.encode(b, s.stable());
+            ByteBufCodecs.VAR_INT.encode(b, s.glitch());
         }
 
         private static Sync read(ByteBuf b) {
@@ -44,9 +48,24 @@ public class Net {
             int oc = ByteBufCodecs.VAR_INT.decode(b);
             int oh = ByteBufCodecs.VAR_INT.decode(b);
             List<String> sl = STRS.decode(b);
-            return new Sync(praxis, lv, act, en, oc, oh, sl);
+            int st = ByteBufCodecs.VAR_INT.decode(b);
+            int gl = ByteBufCodecs.VAR_INT.decode(b);
+            return new Sync(praxis, lv, act, en, oc, oh, sl, st, gl);
         }
 
+        @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
+    }
+
+    /** servidor -> clientes próximos: o visual das augs de outro jogador. */
+    public record PublicSync(UUID id, HashMap<String, Integer> levels, List<String> active, int overclock)
+            implements CustomPacketPayload {
+        public static final Type<PublicSync> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, "public_sync"));
+        public static final StreamCodec<ByteBuf, PublicSync> CODEC = StreamCodec.composite(
+                UUIDUtil.STREAM_CODEC, PublicSync::id,
+                LEVELS, PublicSync::levels,
+                STRS, PublicSync::active,
+                ByteBufCodecs.VAR_INT, PublicSync::overclock,
+                PublicSync::new);
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     }
 
@@ -64,6 +83,8 @@ public class Net {
         PayloadRegistrar r = e.registrar("1");
         r.playToClient(Sync.TYPE, Sync.CODEC,
                 (p, ctx) -> ctx.enqueueWork(() -> com.nanoaug.client.ClientHooks.sync(p)));
+        r.playToClient(PublicSync.TYPE, PublicSync.CODEC,
+                (p, ctx) -> ctx.enqueueWork(() -> com.nanoaug.client.ClientHooks.publicSync(p)));
         r.playToServer(Request.TYPE, Request.CODEC,
                 (p, ctx) -> ctx.enqueueWork(() -> {
                     if (ctx.player() instanceof ServerPlayer sp) Logic.handle(sp, p);
@@ -74,6 +95,11 @@ public class Net {
         AugData d = AugData.get(p);
         PacketDistributor.sendToPlayer(p, new Sync(d.praxis, new HashMap<>(d.levels),
                 new ArrayList<>(d.active), d.energy, d.overclock, d.overheat,
-                new ArrayList<>(java.util.Arrays.asList(d.slots))));
+                new ArrayList<>(java.util.Arrays.asList(d.slots)), d.stable, d.glitch));
+    }
+
+    public static PublicSync publicOf(ServerPlayer p) {
+        AugData d = AugData.get(p);
+        return new PublicSync(p.getUUID(), new HashMap<>(d.levels), new ArrayList<>(d.active), d.overclock);
     }
 }

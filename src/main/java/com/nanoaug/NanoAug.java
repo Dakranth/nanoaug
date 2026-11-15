@@ -26,6 +26,14 @@ public class NanoAug {
     public static final DeferredItem<Item> PRAXIS_KIT = ITEMS.register("praxis_kit",
             () -> new PraxisKitItem(new Item.Properties().stacksTo(16).rarity(Rarity.EPIC)));
 
+    public static final DeferredItem<Item> BIOCELL = ITEMS.register("biocell",
+            () -> new BiocellItem(new Item.Properties().stacksTo(16).rarity(Rarity.UNCOMMON)));
+    public static final DeferredItem<Item> NEUROPOZYNE = ITEMS.register("neuropozyne",
+            () -> new NeuropozyneItem(new Item.Properties().stacksTo(8).rarity(Rarity.RARE)));
+    public static final DeferredItem<Item> TESLA_CARTRIDGE = ITEMS.registerSimpleItem("tesla_cartridge", new Item.Properties());
+    public static final DeferredItem<Item> BLADE_AMMO = ITEMS.registerSimpleItem("blade_ammo", new Item.Properties());
+    public static final DeferredItem<Item> TYPHOON_AMMO = ITEMS.registerSimpleItem("typhoon_ammo", new Item.Properties());
+
     public static final Supplier<AttachmentType<AugData>> AUG_DATA = ATTACHMENTS.register("aug_data",
             () -> AttachmentType.builder(AugData::new).serialize(AugData.CODEC).copyOnDeath().build());
 
@@ -33,7 +41,14 @@ public class NanoAug {
             () -> CreativeModeTab.builder()
                     .title(Component.translatable("itemGroup.nanoaug"))
                     .icon(() -> new ItemStack(PRAXIS_KIT.get()))
-                    .displayItems((params, out) -> out.accept(PRAXIS_KIT.get()))
+                    .displayItems((params, out) -> {
+                        out.accept(PRAXIS_KIT.get());
+                        out.accept(BIOCELL.get());
+                        out.accept(NEUROPOZYNE.get());
+                        out.accept(TESLA_CARTRIDGE.get());
+                        out.accept(BLADE_AMMO.get());
+                        out.accept(TYPHOON_AMMO.get());
+                    })
                     .build());
 
     public NanoAug(IEventBus bus) {

@@ -1,0 +1,1 @@
+{"display": {"icon": {"id": "minecraft:feather"}, "title": {"translate": "advancement.nanoaug.ledge.title"}, "description": {"translate": "advancement.nanoaug.ledge.desc"}, "frame": "task", "show_toast": true, "announce_to_chat": true, "hidden": false}, "criteria": {"done": {"trigger": "minecraft:impossible"}}, "parent": "nanoaug:augmented"}
