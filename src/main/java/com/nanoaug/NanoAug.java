@@ -34,6 +34,13 @@ public class NanoAug {
     public static final DeferredItem<Item> BLADE_AMMO = ITEMS.registerSimpleItem("blade_ammo", new Item.Properties());
     public static final DeferredItem<Item> TYPHOON_AMMO = ITEMS.registerSimpleItem("typhoon_ammo", new Item.Properties());
 
+    public static final DeferredItem<Item> CALIBRATOR_1 = ITEMS.register("calibrator_1",
+            () -> new CalibratorItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC), 1));
+    public static final DeferredItem<Item> CALIBRATOR_2 = ITEMS.register("calibrator_2",
+            () -> new CalibratorItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC), 2));
+    public static final DeferredItem<Item> CALIBRATOR_3 = ITEMS.register("calibrator_3",
+            () -> new CalibratorItem(new Item.Properties().stacksTo(1).rarity(Rarity.EPIC), 3));
+
     public static final Supplier<AttachmentType<AugData>> AUG_DATA = ATTACHMENTS.register("aug_data",
             () -> AttachmentType.builder(AugData::new).serialize(AugData.CODEC).copyOnDeath().build());
 
@@ -48,6 +55,9 @@ public class NanoAug {
                         out.accept(TESLA_CARTRIDGE.get());
                         out.accept(BLADE_AMMO.get());
                         out.accept(TYPHOON_AMMO.get());
+                        out.accept(CALIBRATOR_1.get());
+                        out.accept(CALIBRATOR_2.get());
+                        out.accept(CALIBRATOR_3.get());
                     })
                     .build());
 

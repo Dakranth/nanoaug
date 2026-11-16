@@ -73,18 +73,26 @@ public enum Aug {
     public Component lockReason(AugData d) {
         if (requires != null) {
             Aug r = byId(requires);
-            if (r != null && d.lvl(r) < reqLvl)
+            if (r != null && d.rawLvl(r) < reqLvl)
                 return Component.translatable("gui.nanoaug.requires", Component.translatable(r.nameKey()), reqLvl);
         }
         if (exclusive != null) {
             Aug x = byId(exclusive);
-            if (x != null && d.lvl(x) > 0) return Component.translatable("gui.nanoaug.exclusive");
+            if (x != null && d.rawLvl(x) > 0) return Component.translatable("gui.nanoaug.exclusive");
         }
         return null;
     }
 
-    public boolean canUpgrade(AugData d) { return d.lvl(this) < max() && lockReason(d) == null; }
-    public int nextCost(AugData d) { return costs[d.lvl(this)]; }
+    public boolean canUpgrade(AugData d) { return d.rawLvl(this) < max() && lockReason(d) == null; }
+    public int nextCost(AugData d) { return costs[d.rawLvl(this)]; }
+
+    /** augs experimentais somam carga no sistema enquanto ativos. */
+    public boolean experimental() {
+        return this == PEPS || this == REMOTE_HACK || this == TESLA || this == NANOBLADE || this == ICARUS_DASH || this == TITAN;
+    }
+
+    /** próteses (braço, perna) são hardware: não entram em standby. */
+    public boolean canStandby() { return this != ARM && this != LEG; }
 
     public static Aug byId(String id) {
         for (Aug a : values()) if (a.id.equals(id)) return a;

@@ -155,6 +155,7 @@ public class Logic {
             case 3 -> equip(p, r.id());
             case 5 -> dashAimed(p);
             case 6 -> hackRemote(p);
+            case 7 -> toggleStandby(p, r.id());
             default -> {}
         }
     }
@@ -166,14 +167,14 @@ public class Logic {
         if (d.praxis < c) return;
         d.praxis -= c;
         d.levels.merge(a.id, 1, Integer::sum);
-        if (a.mode != Aug.Mode.PASSIVE && d.lvl(a) == 1) { // equipa no primeiro slot livre
+        if (a.mode != Aug.Mode.PASSIVE && d.rawLvl(a) == 1) { // equipa no primeiro slot livre
             boolean already = false;
             for (String sl : d.slots) if (a.id.equals(sl)) already = true;
             if (!already) for (int i = 0; i < 4; i++) if (d.slots[i].isEmpty()) { d.slots[i] = a.id; break; }
         }
         p.serverLevel().playSound(null, p.blockPosition(), SoundEvents.BEACON_ACTIVATE, SoundSource.PLAYERS, 1f, 1.5f);
         p.displayClientMessage(Component.translatable("msg.nanoaug.installed",
-                Component.translatable(a.levelKey(d.lvl(a)))), true);
+                Component.translatable(a.levelKey(d.rawLvl(a)))), true);
         applyPassives(p);
         grant(p, "augmented");
         boolean all = true;
@@ -194,6 +195,25 @@ public class Logic {
         p.serverLevel().playSound(null, p.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 1f, 0.6f);
         Fx.ring(p.serverLevel(), p.position(), 1.5);
         msg(p, "overclock");
+        applyPassives(p);
+        Net.sync(p);
+    }
+
+    /** Standby: o aug continua instalado (com os níveis), mas não faz efeito nem pesa no sistema. */
+    static void toggleStandby(ServerPlayer p, String id) {
+        AugData d = AugData.get(p);
+        Aug a = Aug.byId(id);
+        if (a == null || !a.canStandby() || !d.installed(a)) return;
+        if (d.standby.remove(a.id)) {
+            msg(p, "standby_off");
+        } else {
+            d.standby.add(a.id);
+            if (d.active.remove(a.id)) {
+                if (a == Aug.CLOAK) p.removeEffect(MobEffects.INVISIBILITY);
+                if (a == Aug.SMART_VISION) p.removeEffect(MobEffects.NIGHT_VISION);
+            }
+            msg(p, "standby_on");
+        }
         applyPassives(p);
         Net.sync(p);
     }
@@ -328,7 +348,7 @@ public class Logic {
 
     private static boolean glitchRoll(ServerPlayer p, AugData d, Aug a) {
         if (!experimental(a) || d.stable > 0) return false;
-        float chance = 0.02f * experimentalCount(d) * (d.overclock > 0 ? 1.5f : 1f);
+        float chance = SystemLoad.failPct(d) / 100f * (d.overclock > 0 ? 1.25f : 1f);
         if (p.getRandom().nextFloat() >= chance) return false;
         glitch(p, d, "glitch");
         return true;
@@ -687,7 +707,8 @@ public class Logic {
         d.cooldowns.replaceAll((key, v) -> Math.max(0, v - 1));
         if (d.stable > 0) d.stable--;
         if (d.glitch > 0) d.glitch--;
-        if (experimentalCount(d) >= 3 && d.stable == 0 && p.tickCount % 20 == 0 && p.getRandom().nextFloat() < 0.008f) {
+        int sysLoad = SystemLoad.load(d);
+        if (sysLoad >= 200 && d.stable == 0 && p.tickCount % 20 == 0 && p.getRandom().nextFloat() < 0.008f * (sysLoad - 150) / 50f) {
             glitch(p, d, "rejection");
             p.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 80, 0));
         }

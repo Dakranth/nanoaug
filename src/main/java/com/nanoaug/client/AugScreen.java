@@ -3,6 +3,7 @@ package com.nanoaug.client;
 import com.nanoaug.Aug;
 import com.nanoaug.AugData;
 import com.nanoaug.Net;
+import com.nanoaug.SystemLoad;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -74,7 +75,7 @@ public class AugScreen extends Screen {
     private static boolean usable(AugData d, Aug a) { return a.mode != Aug.Mode.PASSIVE && d.has(a); }
 
     private Component upgradeLabel(AugData d) {
-        int l = d.lvl(sel);
+        int l = d.rawLvl(sel);
         if (l >= sel.max()) return Component.translatable("gui.nanoaug.maxed");
         if (sel.lockReason(d) != null) return Component.translatable("gui.nanoaug.locked_btn");
         int c = sel.nextCost(d);
@@ -104,6 +105,17 @@ public class AugScreen extends Screen {
         g.drawString(font, Component.translatable("gui.nanoaug.overclock_hint",
                 ClientSetup.OVERCLOCK.getTranslatedKeyMessage()), 12, 39, GRAY, true);
 
+        // ---- medidor do sistema (carga e chance de falha)
+        int load = SystemLoad.load(d);
+        boolean calm = d.stable > 0 || load <= 100;
+        int mxp = Math.max(bx - 22, 132);
+        int mcol = calm ? GREEN : RED;
+        g.drawString(font, Component.translatable("gui.nanoaug.system", load), mxp, 6, mcol, true);
+        g.drawString(font, d.stable > 0 ? Component.translatable("gui.nanoaug.system_stable")
+                : Component.translatable("gui.nanoaug.system_fail", Math.round(SystemLoad.failPct(d))), mxp, 17, mcol, false);
+        g.drawString(font, Component.translatable("gui.nanoaug.calib", d.calib == 0 ? "-" : "Mk " + "I".repeat(d.calib),
+                SystemLoad.weightFor(d.calib)), mxp, 28, GRAY, false);
+
         // corpo
         g.renderOutline(bx - 30, cy - 100, 60, 175, 0x66F0B83A);
         InventoryScreen.renderEntityInInventoryFollowsMouse(g, bx - 28, cy - 98, bx + 28, cy + 72, 68, 0.0625F, mx, my, p);
@@ -131,7 +143,7 @@ public class AugScreen extends Screen {
         for (int i = scroll; i < Math.min(list.size(), scroll + VIS); i++) {
             Aug a = list.get(i);
             int ry = py + 18 + (i - scroll) * ROW;
-            int l = d.lvl(a);
+            int l = d.rawLvl(a);
             g.fill(px + 4, ry, px + PW - 4, ry + ROW - 2, a == sel ? 0xAA3A2E08 : 0x66000000);
             Component right;
             int rc;
@@ -143,12 +155,17 @@ public class AugScreen extends Screen {
             g.drawString(font, right, px + PW - 8 - rw, ry + 2, rc, true);
             Component tag;
             int tc;
-            if (a.mode == Aug.Mode.PASSIVE) { tag = Component.translatable("gui.nanoaug.tag_passive"); tc = 0xFF666666; }
+            if (d.standby.contains(a.id)) { tag = Component.translatable("gui.nanoaug.tag_standby"); tc = 0xFF888888; }
+            else if (a.mode == Aug.Mode.PASSIVE) { tag = Component.translatable("gui.nanoaug.tag_passive"); tc = 0xFF666666; }
             else if (l > 0 && slotIndexOf(d, a) >= 0) {
                 tag = Component.translatable("gui.nanoaug.tag_equipped", ClientSetup.SLOTS[slotIndexOf(d, a)].getTranslatedKeyMessage());
                 tc = GREEN;
             } else { tag = Component.translatable("gui.nanoaug.tag_usable"); tc = AMBER; }
             g.drawString(font, tag, px + 8, ry + 11, tc, false);
+            if (a.experimental()) {
+                Component ex = Component.translatable("gui.nanoaug.tag_exp");
+                g.drawString(font, ex, px + PW - 8 - font.width(ex), ry + 11, RED, false);
+            }
         }
         if (list.size() > VIS) {
             g.drawString(font, "^", px + PW - 12, py + 6, scroll > 0 ? AMBER : 0xFF444444, false);
@@ -156,9 +173,11 @@ public class AugScreen extends Screen {
         }
 
         // detalhes
-        int dx = px + 8, dw = PW - 16, dy = py + 18 + VIS * ROW + 4, maxY = py + PH - 30;
-        int l = d.lvl(sel);
+        int dx = px + 8, dw = PW - 16, dy = py + 18 + VIS * ROW + 4, maxY = py + PH - 46;
+        int l = d.rawLvl(sel);
         dy = para(g, Component.translatable(sel.nameKey()), dx, dy, dw, AMBER, maxY);
+        if (sel.experimental())
+            dy = para(g, Component.translatable("gui.nanoaug.exp_warn", SystemLoad.weightFor(d.calib)), dx, dy, dw, RED, maxY);
         if (l > 0) {
             dy = para(g, Component.translatable("gui.nanoaug.level", l, sel.max()).append(": ")
                     .append(Component.translatable(sel.levelKey(l))), dx, dy, dw, GREEN, maxY);
@@ -191,6 +210,16 @@ public class AugScreen extends Screen {
             g.renderOutline(x2, bY, w1, 14, GOLD);
             g.drawCenteredString(font, Component.translatable(eq ? "gui.nanoaug.unequip" : "gui.nanoaug.equip"),
                     x2 + w1 / 2, bY + 3, GOLD);
+        }
+
+        if (d.installed(sel) && sel.canStandby()) { // standby
+            boolean sb = d.standby.contains(sel.id);
+            int sy2 = bY - 18;
+            boolean hovS = in(mx, my, px + 8, sy2, PW - 16, 14);
+            g.fill(px + 8, sy2, px + PW - 8, sy2 + 14, hovS ? 0xFF3A3A3A : 0xAA101010);
+            g.renderOutline(px + 8, sy2, PW - 16, 14, sb ? GREEN : GRAY);
+            g.drawCenteredString(font, Component.translatable(sb ? "gui.nanoaug.standby_off" : "gui.nanoaug.standby_on"),
+                    px + PW / 2, sy2 + 3, sb ? GREEN : DIM);
         }
 
         // ---- 4 slots de uso (Z X C V)
@@ -262,6 +291,10 @@ public class AugScreen extends Screen {
         int bY = py + PH - 20;
         boolean canEquip = usable(d, sel);
         int w1 = canEquip ? (PW - 20) / 2 : PW - 16;
+        if (d.installed(sel) && sel.canStandby() && in(mx, my, px + 8, bY - 18, PW - 16, 14)) {
+            PacketDistributor.sendToServer(new Net.Request(sel.id, (byte) 7));
+            return true;
+        }
         if (in(mx, my, px + 8, bY, w1, 14)) {
             if (sel.canUpgrade(d) && d.praxis >= sel.nextCost(d))
                 PacketDistributor.sendToServer(new Net.Request(sel.id, (byte) 0));

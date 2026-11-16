@@ -1,0 +1,1 @@
+{"type": "minecraft:crafting_shapeless", "category": "misc", "ingredients": [{"item": "minecraft:nether_star"}, {"item": "minecraft:netherite_ingot"}, {"item": "minecraft:amethyst_shard"}, {"item": "minecraft:redstone_block"}], "result": {"id": "nanoaug:calibrator_1", "count": 1}}

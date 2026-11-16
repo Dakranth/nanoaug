@@ -5,6 +5,7 @@ import com.nanoaug.Ammo;
 import com.nanoaug.Apartheid;
 import com.nanoaug.AugData;
 import com.nanoaug.Logic;
+import com.nanoaug.SystemLoad;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -143,11 +144,12 @@ public class AugHud {
             g.drawCenteredString(f, Component.translatable("hud.nanoaug.landing_ok"), w / 2, h / 2 + 60, AMBER);
 
         // ---- estabilidade das augs (Neuropozyne)
+        int load = SystemLoad.load(d);
         if (d.stable > 0) {
             int sec = d.stable / 20;
-            g.drawString(f, Component.translatable("hud.nanoaug.stable", String.format("%d:%02d", sec / 60, sec % 60)), 8, 8, GREEN, true);
-        } else if (Logic.experimentalCount(d) >= 3) {
-            g.drawString(f, Component.translatable("hud.nanoaug.unstable"), 8, 8, RED, true);
+            g.drawString(f, Component.translatable("hud.nanoaug.stable", String.format("%d:%02d", sec / 60, sec % 60), load), 8, 8, GREEN, true);
+        } else if (load > 100) {
+            g.drawString(f, Component.translatable("hud.nanoaug.load", load, Math.round(SystemLoad.failPct(d))), 8, 8, RED, true);
         }
 
         // ---- efeitos de tela: estática (sobreaquecimento/falha) e clarão amarelo (uso/overclock)

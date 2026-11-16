@@ -18,7 +18,9 @@ public class AugData {
             Codec.INT.optionalFieldOf("overclock", 0).forGetter(d -> d.overclock),
             Codec.INT.optionalFieldOf("overheat", 0).forGetter(d -> d.overheat),
             Codec.STRING.listOf().optionalFieldOf("slots", List.of()).forGetter(d -> Arrays.asList(d.slots)),
-            Codec.INT.optionalFieldOf("stable", 0).forGetter(d -> d.stable)
+            Codec.INT.optionalFieldOf("stable", 0).forGetter(d -> d.stable),
+            Codec.STRING.listOf().optionalFieldOf("standby", List.of()).forGetter(d -> new ArrayList<>(d.standby)),
+            Codec.INT.optionalFieldOf("calib", 0).forGetter(d -> d.calib)
     ).apply(i, AugData::new));
 
     public int praxis;
@@ -29,6 +31,10 @@ public class AugData {
     public int overheat;
     /** ticks restantes de estabilidade (Neuropozyne). */
     public int stable;
+    /** augs instalados mas desligados (não fazem efeito e não pesam no sistema). */
+    public final Set<String> standby = new HashSet<>();
+    /** nível do Núcleo de Calibração já usado (0 a 3). */
+    public int calib;
     /** ticks de falha de sistema (efeito de tela). */
     public int glitch;
     public int lastWarn;
@@ -42,7 +48,7 @@ public class AugData {
 
     public AugData() {}
 
-    public AugData(int praxis, Map<String, Integer> lv, List<String> act, float energy, int oc, int oh, List<String> sl, int st) {
+    public AugData(int praxis, Map<String, Integer> lv, List<String> act, float energy, int oc, int oh, List<String> sl, int st, List<String> sb, int cal) {
         this.praxis = praxis;
         this.levels.putAll(lv);
         this.active.addAll(act);
@@ -50,12 +56,18 @@ public class AugData {
         this.overclock = oc;
         this.overheat = oh;
         this.stable = st;
+        this.standby.addAll(sb);
+        this.calib = cal;
         for (int i = 0; i < 4 && i < sl.size(); i++) this.slots[i] = sl.get(i);
     }
 
     public static AugData get(Player p) { return p.getData(NanoAug.AUG_DATA.get()); }
 
-    public int lvl(Aug a) { return levels.getOrDefault(a.id, 0); }
+    /** nível instalado (ignora standby): usado na tela e nas melhorias. */
+    public int rawLvl(Aug a) { return levels.getOrDefault(a.id, 0); }
+    /** nível efetivo: 0 se estiver em standby. Todo efeito do jogo usa este. */
+    public int lvl(Aug a) { return standby.contains(a.id) ? 0 : rawLvl(a); }
+    public boolean installed(Aug a) { return rawLvl(a) > 0; }
     public boolean has(Aug a) { return lvl(a) > 0; }
     public boolean active(Aug a) { return active.contains(a.id); }
     public boolean any(Aug.Slot s) {

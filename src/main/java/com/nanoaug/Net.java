@@ -24,7 +24,8 @@ public class Net {
 
     /** servidor -> cliente */
     public record Sync(int praxis, HashMap<String, Integer> levels, List<String> active, float energy,
-                       int overclock, int overheat, List<String> slots, int stable, int glitch) implements CustomPacketPayload {
+                       int overclock, int overheat, List<String> slots, int stable, int glitch,
+                       List<String> standby, int calib) implements CustomPacketPayload {
         public static final Type<Sync> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(NanoAug.MODID, "sync"));
         public static final StreamCodec<ByteBuf, Sync> CODEC = StreamCodec.of(Sync::write, Sync::read);
 
@@ -38,6 +39,8 @@ public class Net {
             STRS.encode(b, s.slots());
             ByteBufCodecs.VAR_INT.encode(b, s.stable());
             ByteBufCodecs.VAR_INT.encode(b, s.glitch());
+            STRS.encode(b, s.standby());
+            ByteBufCodecs.VAR_INT.encode(b, s.calib());
         }
 
         private static Sync read(ByteBuf b) {
@@ -50,7 +53,9 @@ public class Net {
             List<String> sl = STRS.decode(b);
             int st = ByteBufCodecs.VAR_INT.decode(b);
             int gl = ByteBufCodecs.VAR_INT.decode(b);
-            return new Sync(praxis, lv, act, en, oc, oh, sl, st, gl);
+            List<String> sb = STRS.decode(b);
+            int cal = ByteBufCodecs.VAR_INT.decode(b);
+            return new Sync(praxis, lv, act, en, oc, oh, sl, st, gl, sb, cal);
         }
 
         @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
@@ -95,11 +100,14 @@ public class Net {
         AugData d = AugData.get(p);
         PacketDistributor.sendToPlayer(p, new Sync(d.praxis, new HashMap<>(d.levels),
                 new ArrayList<>(d.active), d.energy, d.overclock, d.overheat,
-                new ArrayList<>(java.util.Arrays.asList(d.slots)), d.stable, d.glitch));
+                new ArrayList<>(java.util.Arrays.asList(d.slots)), d.stable, d.glitch,
+                new ArrayList<>(d.standby), d.calib));
     }
 
     public static PublicSync publicOf(ServerPlayer p) {
         AugData d = AugData.get(p);
-        return new PublicSync(p.getUUID(), new HashMap<>(d.levels), new ArrayList<>(d.active), d.overclock);
+        HashMap<String, Integer> eff = new HashMap<>(d.levels);
+        eff.keySet().removeAll(d.standby);
+        return new PublicSync(p.getUUID(), eff, new ArrayList<>(d.active), d.overclock);
     }
 }

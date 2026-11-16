@@ -34,6 +34,9 @@ public class ClientHooks {
         d.overheat = s.overheat();
         d.stable = s.stable();
         d.glitch = s.glitch();
+        d.standby.clear();
+        d.standby.addAll(s.standby());
+        d.calib = s.calib();
         for (int i = 0; i < 4; i++) d.slots[i] = i < s.slots().size() ? s.slots().get(i) : "";
     }
 }
